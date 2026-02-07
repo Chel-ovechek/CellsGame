@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=yes">
+    <link rel="stylesheet" href="styles.css" />
+    <title>CellsGame</title>
+</head>
+<body>
+    <h1>Клетки</h1>
+
+    <div class="controls">
+        <button id = "upperButton" onclick="rollDice()">Бросить кубики</button>
+        <span id="diceResult">?</span>
+        <button  id ="rotateButton">Повернуть</button>
+        <button id = "upperButton" onclick="resetGame()">🔄 Перезапустить игру</button>
+    </div>
+    
+    <div class="grid" id="grid"></div>
+
+    <div class="stats">
+        <span id="red">Красных клеток</span>
+        <span id="blue">Синих клеток</span>
+    </div>
+    <script type="module" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
+    <script type="module" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js"></script>
+    <script type="module" src="script.js"></script>
+</body>
+</html>
