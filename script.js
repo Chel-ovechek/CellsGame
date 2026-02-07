@@ -14,29 +14,32 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// Состояние игры
 let myRole = null; 
 let currentTurn = 'red';
 let occupiedGrid = Array(20).fill().map(() => Array(20).fill(false));
 let currentDice = { w: 0, h: 0 };
 let activeRectElement = null;
-let gameEndedAlertShown = false; // Чтобы окно победы не всплывало постоянно
+let gameEndedAlertShown = false;
 
 const gridElement = document.getElementById('grid');
 const diceResult = document.getElementById('diceResult');
+const previewZone = document.getElementById('preview-zone');
+const confirmBtn = document.getElementById('confirmMoveButton');
 
-// 1. ОПРЕДЕЛЕНИЕ РОЛИ
 function assignRole() {
     const params = new URLSearchParams(window.location.search);
     myRole = params.get('player');
     if (!myRole) {
         myRole = confirm("Играть за КРАСНЫХ? (Ок - Красные, Отмена - Синие)") ? 'red' : 'blue';
     }
-    document.querySelector('h1').innerText = `Клетки: ${myRole === 'red' ? 'КРАСНЫЙ' : 'СИНИЙ'} игрок`;
+    document.querySelector('h1').innerText = `Клетки: ${myRole === 'red' ? 'КРАСНЫЙ' : 'СИНИЙ'}`;
 }
 assignRole();
 
-// 2. ОТРИСОВКА СЕТКИ
+function getCellSize() {
+    return gridElement.clientWidth / 20;
+}
+
 function drawVisualGrid() {
     gridElement.innerHTML = '';
     for (let i = 0; i < 400; i++) {
@@ -47,11 +50,61 @@ function drawVisualGrid() {
 }
 drawVisualGrid();
 
-// 3. ПРОВЕРКА ВОЗМОЖНОСТИ ХОДА
-function canPlaceRectangle(gridX, gridY, width, height) {
-    if (gridX < 0 || gridY < 0 || gridX + width > 20 || gridY + height > 20) return false;
-    for (let i = gridY; i < gridY + height; i++) {
-        for (let j = gridX; j < gridX + width; j++) {
+onValue(ref(db, "/"), (snapshot) => {
+    const data = snapshot.val() || {};
+    currentTurn = data.turn || 'red';
+    const figures = data.figures || {};
+    const gameState = data.gameState || 'playing';
+
+    occupiedGrid = Array(20).fill().map(() => Array(20).fill(false));
+    document.querySelectorAll('.rectangle.fixed').forEach(el => el.remove());
+
+    let rScore = 0, bScore = 0;
+    const cellSize = getCellSize();
+
+    for (let id in figures) {
+        const f = figures[id];
+        const rect = document.createElement('div');
+        rect.classList.add('rectangle', 'fixed');
+        rect.style.width = `${f.width * cellSize}px`;
+        rect.style.height = `${f.height * cellSize}px`;
+        rect.style.left = `${f.x * cellSize}px`;
+        rect.style.top = `${f.y * cellSize}px`;
+        rect.style.backgroundColor = f.color === 'red' ? '#e84351' : '#0960e3';
+        gridElement.appendChild(rect);
+
+        for (let y = f.y; y < f.y + f.height; y++) {
+            for (let x = f.x; x < f.x + f.width; x++) {
+                if (y < 20 && x < 20) occupiedGrid[y][x] = true;
+            }
+        }
+        if (f.color === 'red') rScore += f.width * f.height;
+        else bScore += f.width * f.height;
+    }
+
+    document.getElementById('red').innerText = `Красных: ${rScore}`;
+    document.getElementById('blue').innerText = `Синих: ${bScore}`;
+    
+    if (gameState === 'finished') {
+        diceResult.innerText = "ФИНАЛ";
+        if (!gameEndedAlertShown) {
+            gameEndedAlertShown = true;
+            const winner = rScore > bScore ? "КРАСНЫЕ" : (bScore > rScore ? "СИНИЕ" : "НИЧЬЯ");
+            setTimeout(() => {
+                if (confirm(`МЕСТА НЕТ!\nПобедитель: ${winner}\nСчет: ${rScore} - ${bScore}\nСыграть снова?`)) window.resetGame();
+            }, 500);
+        }
+    } else {
+        gameEndedAlertShown = false;
+        diceResult.innerText = (currentTurn === myRole) ? `Ваш ход! (${data.lastDice || '?'})` : `Ждем противника...`;
+    }
+});
+
+function canPlaceRectangle(x, y, w, h) {
+    if (isNaN(x) || isNaN(y)) return false;
+    if (x < 0 || y < 0 || x + w > 20 || y + h > 20) return false;
+    for (let i = y; i < y + h; i++) {
+        for (let j = x; j < x + w; j++) {
             if (occupiedGrid[i][j]) return false;
         }
     }
@@ -59,13 +112,11 @@ function canPlaceRectangle(gridX, gridY, width, height) {
 }
 
 function canFitAnywhere(w, h) {
-    // Проверка обычного положения
     for (let y = 0; y <= 20 - h; y++) {
         for (let x = 0; x <= 20 - w; x++) {
             if (canPlaceRectangle(x, y, w, h)) return true;
         }
     }
-    // Проверка повернутого положения
     if (w !== h) {
         for (let y = 0; y <= 20 - w; y++) {
             for (let x = 0; x <= 20 - h; x++) {
@@ -76,84 +127,16 @@ function canFitAnywhere(w, h) {
     return false;
 }
 
-// 4. ГЛАВНЫЙ СЛУШАТЕЛЬ FIREBASE
-onValue(ref(db, "/"), (snapshot) => {
-    const data = snapshot.val() || {};
-    currentTurn = data.turn || 'red';
-    const figures = data.figures || {};
-    const gameState = data.gameState || 'playing';
-
-    occupiedGrid = Array(20).fill().map(() => Array(20).fill(false));
-    document.querySelectorAll('.rectangle.fixed').forEach(el => el.remove());
-
-    let redScore = 0;
-    let blueScore = 0;
-
-    for (let id in figures) {
-        const f = figures[id];
-        renderFixedRectangle(f);
-        for (let y = f.y; y < f.y + f.height; y++) {
-            for (let x = f.x; x < f.x + f.width; x++) {
-                if (y < 20 && x < 20) occupiedGrid[y][x] = true;
-            }
-        }
-        if (f.color === 'red') redScore += f.width * f.height;
-        else blueScore += f.width * f.height;
-    }
-
-    document.getElementById('red').innerText = `Красных клеток: ${redScore}`;
-    document.getElementById('blue').innerText = `Синих клеток: ${blueScore}`;
-    
-    // Обновление статуса
-    if (gameState === 'finished') {
-        diceResult.innerText = "ИГРА ОКОНЧЕНА";
-        if (!gameEndedAlertShown) {
-            gameEndedAlertShown = true;
-            const winner = redScore > blueScore ? "КРАСНЫЕ" : (blueScore > redScore ? "СИНИЕ" : "НИЧЬЯ");
-            setTimeout(() => {
-                if (confirm(`МЕСТА НЕТ!\nПобедитель: ${winner}\nСчет: ${redScore} - ${blueScore}\nСыграть снова?`)) {
-                    window.resetGame();
-                }
-            }, 500);
-        }
-    } else {
-        gameEndedAlertShown = false;
-        diceResult.innerText = (currentTurn === myRole) ? `Ваш ход! (Выпало: ${data.lastDice || '?'})` : `Ход противника...`;
-    }
-});
-
-function renderFixedRectangle(f) {
-    const rect = document.createElement('div');
-    rect.classList.add('rectangle', 'fixed');
-    rect.style.width = `${f.width * 20 - 4}px`;
-    rect.style.height = `${f.height * 20 - 4}px`;
-    rect.style.left = `${f.x * 20 + 2}px`;
-    rect.style.top = `${f.y * 20 + 2}px`;
-    rect.style.backgroundColor = f.color === 'red' ? 'rgba(255, 0, 0, 0.8)' : 'rgba(0, 0, 255, 0.8)';
-    gridElement.appendChild(rect);
-}
-
-// 5. ЛОГИКА БРОСКА И ХОДА
 window.rollDice = function() {
-    if (currentTurn !== myRole) {
-        alert("Сейчас ход противника!");
-        return;
-    }
-    if (activeRectElement) {
-        alert("Фигура уже на поле!");
-        return;
-    }
+    if (currentTurn !== myRole) return alert("Сейчас ход противника!");
+    if (activeRectElement) return alert("Фигура уже готова!");
 
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
     currentDice = { w: d1, h: d2 };
 
-    // Проверка на конец игры
     if (!canFitAnywhere(d1, d2)) {
-        update(ref(db), { 
-            gameState: "finished",
-            lastDice: `${d1}x${d2} (Не влезло)`
-        });
+        update(ref(db), { gameState: "finished", lastDice: `${d1}x${d2}` });
         return;
     }
 
@@ -162,97 +145,101 @@ window.rollDice = function() {
 };
 
 function createDraggableRectangle(w, h) {
+    const cellSize = getCellSize();
     activeRectElement = document.createElement('div');
     activeRectElement.classList.add('rectangle');
-    activeRectElement.style.width = `${w * 20 - 4}px`;
-    activeRectElement.style.height = `${h * 20 - 4}px`;
-    activeRectElement.style.backgroundColor = myRole === 'red' ? 'rgba(255, 0, 0, 0.5)' : 'rgba(0, 0, 255, 0.5)';
-    activeRectElement.style.left = '0px';
-    activeRectElement.style.top = '0px';
-    gridElement.appendChild(activeRectElement);
+    activeRectElement.style.width = `${w * cellSize}px`;
+    activeRectElement.style.height = `${h * cellSize}px`;
+    activeRectElement.style.backgroundColor = myRole === 'red' ? '#e84351' : '#0960e3';
+    
+    previewZone.innerHTML = '';
+    previewZone.appendChild(activeRectElement);
+    confirmBtn.style.display = 'block';
 
     let isDragging = false;
+    let isOnGrid = false;
 
     activeRectElement.onpointerdown = (e) => {
-        if (e.target.tagName === 'BUTTON') return; 
         isDragging = true;
         activeRectElement.setPointerCapture(e.pointerId);
     };
 
     activeRectElement.onpointermove = (e) => {
         if (!isDragging) return;
+
+        if (!isOnGrid) {
+            gridElement.appendChild(activeRectElement);
+            isOnGrid = true;
+        }
+
         const rect = gridElement.getBoundingClientRect();
-        let x = e.clientX - rect.left - (currentDice.w * 20) / 2;
-        let y = e.clientY - rect.top - (currentDice.h * 20) / 2;
+        const curCellSize = getCellSize();
 
-        let gridX = Math.round(x / 20) * 20;
-        let gridY = Math.round(y / 20) * 20;
+        let x = e.clientX - rect.left - (currentDice.w * curCellSize) / 2;
+        let y = e.clientY - rect.top - (currentDice.h * curCellSize) / 2;
 
-        gridX = Math.max(0, Math.min(gridX, (20 - currentDice.w) * 20));
-        gridY = Math.max(0, Math.min(gridY, (20 - currentDice.h) * 20));
+        let gridX = Math.round(x / curCellSize) * curCellSize;
+        let gridY = Math.round(y / curCellSize) * curCellSize;
+
+        gridX = Math.max(0, Math.min(gridX, (20 - currentDice.w) * curCellSize));
+        gridY = Math.max(0, Math.min(gridY, (20 - currentDice.h) * curCellSize));
 
         activeRectElement.style.left = `${gridX}px`;
         activeRectElement.style.top = `${gridY}px`;
     };
 
-    activeRectElement.onpointerup = (e) => {
-        if (!isDragging) return;
+    activeRectElement.onpointerup = () => {
         isDragging = false;
-        activeRectElement.releasePointerCapture(e.pointerId);
-        showConfirmButton();
     };
 }
 
-function showConfirmButton() {
-    if (activeRectElement.querySelector('.confirm-button')) return;
-    const btn = document.createElement('button');
-    btn.innerText = 'OK';
-    btn.classList.add('confirm-button');
-    btn.onclick = (e) => {
-        e.stopPropagation();
-        finishMove();
-    };
-    activeRectElement.appendChild(btn);
-}
-
-function finishMove() {
-    const x = Math.round(parseInt(activeRectElement.style.left) / 20);
-    const y = Math.round(parseInt(activeRectElement.style.top) / 20);
-    const w = currentDice.w;
-    const h = currentDice.h;
-
-    if (!canPlaceRectangle(x, y, w, h)) {
-        alert("Место занято или выходит за границы!");
-        return;
+confirmBtn.onclick = () => {
+    if (!activeRectElement || activeRectElement.parentElement !== gridElement) {
+        return alert("Перетащите фигуру на поле!");
     }
 
-    const newFigKey = Date.now();
-    const nextTurn = myRole === 'red' ? 'blue' : 'red';
+    const curCellSize = getCellSize();
+    const x = Math.round(parseInt(activeRectElement.style.left) / curCellSize);
+    const y = Math.round(parseInt(activeRectElement.style.top) / curCellSize);
     
+    if (!canPlaceRectangle(x, y, currentDice.w, currentDice.h)) {
+        return alert("Место занято!");
+    }
+
     const updates = {};
-    updates[`/figures/${newFigKey}`] = { x, y, width: w, height: h, color: myRole };
-    updates[`/turn`] = nextTurn;
+    const key = `fig_${Date.now()}`;
+    updates[`/figures/${key}`] = { x, y, width: currentDice.w, height: currentDice.h, color: myRole };
+    updates[`/turn`] = myRole === 'red' ? 'blue' : 'red';
 
     update(ref(db), updates).then(() => {
         activeRectElement.remove();
         activeRectElement = null;
+        confirmBtn.style.display = 'none';
+        previewZone.innerHTML = '';
     });
-}
+};
 
 document.getElementById("rotateButton").onclick = () => {
     if (!activeRectElement) return;
+    const curCellSize = getCellSize();
     [currentDice.w, currentDice.h] = [currentDice.h, currentDice.w];
-    activeRectElement.style.width = `${currentDice.w * 20 - 4}px`;
-    activeRectElement.style.height = `${currentDice.h * 20 - 4}px`;
+
+    activeRectElement.style.width = `${currentDice.w * curCellSize}px`;
+    activeRectElement.style.height = `${currentDice.h * curCellSize}px`;
+
+    if (activeRectElement.parentElement === gridElement) {
+        let lx = parseInt(activeRectElement.style.left) || 0;
+        let ty = parseInt(activeRectElement.style.top) || 0;
+        lx = Math.max(0, Math.min(lx, (20 - currentDice.w) * curCellSize));
+        ty = Math.max(0, Math.min(ty, (20 - currentDice.h) * curCellSize));
+        activeRectElement.style.left = `${lx}px`;
+        activeRectElement.style.top = `${ty}px`;
+    }
 };
 
 window.resetGame = function() {
-    if (confirm("Сбросить игру для всех?")) {
-        set(ref(db), {
-            turn: 'red',
-            figures: {},
-            lastDice: '?',
-            gameState: 'playing'
-        });
+    if (confirm("Сбросить игру?")) {
+        set(ref(db), { turn: 'red', figures: {}, lastDice: '?', gameState: 'playing' })
+        .then(() => location.reload());
     }
 };
