@@ -1,5 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-app.js";
-import { getDatabase, ref, set, onValue, update } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-database.js";
+import { getDatabase, ref, set, onValue, update, get, remove } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-database.js";
 
 const firebaseConfig = {
     apiKey: "AIzaSyBoDZITlAQRzK6D7rxOAHUMMSzXk1htu94",
@@ -15,231 +15,351 @@ const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
 let myRole = null; 
+let currentRoom = "";
+let currentMapType = "square";
+let currentMode = "classic";
 let currentTurn = 'red';
-let occupiedGrid = Array(20).fill().map(() => Array(20).fill(false));
+let currentGameState = 'playing';
+let occupiedGrid = Array(20).fill().map(() => Array(20).fill(null));
+let mapMask = Array(20).fill().map(() => Array(20).fill(1));
 let currentDice = { w: 0, h: 0 };
 let activeRectElement = null;
 let gameEndedAlertShown = false;
 
+const lobbyScreen = document.getElementById('lobby-screen');
+const gameInterface = document.getElementById('game-interface');
 const gridElement = document.getElementById('grid');
 const diceResult = document.getElementById('diceResult');
 const previewZone = document.getElementById('preview-zone');
 const confirmBtn = document.getElementById('confirmMoveButton');
+const roleDisplay = document.getElementById('my-role-display');
 
-function assignRole() {
-    const params = new URLSearchParams(window.location.search);
-    myRole = params.get('player');
-    if (!myRole) {
-        myRole = confirm("Играть за КРАСНЫХ? (Ок - Красные, Отмена - Синие)") ? 'red' : 'blue';
-    }
-    document.querySelector('h1').innerText = `Клетки: ${myRole === 'red' ? 'КРАСНЫЙ' : 'СИНИЙ'}`;
+const RULES = {
+    general: "1. Бросайте кубики.\n2. Тяните фигуру на поле.\n3. Конец игры, если нельзя сходить.",
+    classic: "РЕЖИМ КЛАССИКА:\nСтавьте где угодно!",
+    connected: "РЕЖИМ СВЯЗНОСТЬ:\nФигура должна касаться ваших прошлых фигур. Красные от левого края, Синие - от правого."
+};
+
+function showToast(text) {
+    const container = document.getElementById('toast-container');
+    const toast = document.createElement('div');
+    toast.className = 'toast'; toast.innerText = text;
+    container.appendChild(toast);
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 2500);
 }
-assignRole();
 
-function getCellSize() {
-    return gridElement.clientWidth / 20;
-}
-
-function drawVisualGrid() {
-    gridElement.innerHTML = '';
-    for (let i = 0; i < 400; i++) {
-        const cell = document.createElement('div');
-        cell.classList.add('cell');
-        gridElement.appendChild(cell);
+// ПРОВЕРКА СЕССИИ
+async function checkExistingSession() {
+    const savedRoom = localStorage.getItem('cellsGame_room');
+    const savedRole = localStorage.getItem('cellsGame_role');
+    if (savedRoom && savedRole) {
+        const snap = await get(ref(db, `rooms/${savedRoom}`));
+        if (snap.exists()) {
+            currentRoom = savedRoom; myRole = savedRole; startGame();
+        } else { localStorage.clear(); }
     }
 }
-drawVisualGrid();
+checkExistingSession();
 
-onValue(ref(db, "/"), (snapshot) => {
-    const data = snapshot.val() || {};
-    currentTurn = data.turn || 'red';
-    const figures = data.figures || {};
-    const gameState = data.gameState || 'playing';
+// ЛОББИ
+document.getElementById('btn-create-room').onclick = () => {
+    const name = document.getElementById('room-input').value.trim();
+    if (!name) return showToast("Введите название комнаты!");
+    currentRoom = name;
+    document.getElementById('lobby-main-step').style.display = 'none';
+    document.getElementById('creator-settings').style.display = 'block';
+};
 
-    occupiedGrid = Array(20).fill().map(() => Array(20).fill(false));
-    document.querySelectorAll('.rectangle.fixed').forEach(el => el.remove());
+document.getElementById('info-mode').onclick = () => {
+    const mode = document.getElementById('mode-select').value;
+    showModal("Правила", `${RULES.general}\n\n${RULES[mode]}`, "Понятно", "");
+};
 
-    let rScore = 0, bScore = 0;
-    const cellSize = getCellSize();
+document.getElementById('pick-red').onclick = () => createRoom('red');
+document.getElementById('pick-blue').onclick = () => createRoom('blue');
 
-    for (let id in figures) {
-        const f = figures[id];
-        const rect = document.createElement('div');
-        rect.classList.add('rectangle', 'fixed');
-        rect.style.width = `${f.width * cellSize}px`;
-        rect.style.height = `${f.height * cellSize}px`;
-        rect.style.left = `${f.x * cellSize}px`;
-        rect.style.top = `${f.y * cellSize}px`;
-        rect.style.backgroundColor = f.color === 'red' ? '#e84351' : '#0960e3';
-        gridElement.appendChild(rect);
+async function createRoom(role) {
+    myRole = role;
+    currentMapType = document.getElementById('map-select').value;
+    currentMode = document.getElementById('mode-select').value;
+    localStorage.setItem('cellsGame_room', currentRoom);
+    localStorage.setItem('cellsGame_role', myRole);
+    await set(ref(db, `rooms/${currentRoom}`), {
+        gameState: 'playing', mapType: currentMapType, gameMode: currentMode, turn: 'red', lastDice: '?', players: { [role]: true }
+    });
+    startGame();
+}
 
-        for (let y = f.y; y < f.y + f.height; y++) {
-            for (let x = f.x; x < f.x + f.width; x++) {
-                if (y < 20 && x < 20) occupiedGrid[y][x] = true;
-            }
-        }
-        if (f.color === 'red') rScore += f.width * f.height;
-        else bScore += f.width * f.height;
-    }
-
-    document.getElementById('red').innerText = `Красных: ${rScore}`;
-    document.getElementById('blue').innerText = `Синих: ${bScore}`;
-    
-    if (gameState === 'finished') {
-        diceResult.innerText = "ФИНАЛ";
-        if (!gameEndedAlertShown) {
-            gameEndedAlertShown = true;
-            const winner = rScore > bScore ? "КРАСНЫЕ" : (bScore > rScore ? "СИНИЕ" : "НИЧЬЯ");
-            setTimeout(() => {
-                if (confirm(`МЕСТА НЕТ!\nПобедитель: ${winner}\nСчет: ${rScore} - ${bScore}\nСыграть снова?`)) window.resetGame();
-            }, 500);
-        }
+document.getElementById('btn-join-room').onclick = async () => {
+    const name = document.getElementById('room-input').value.trim();
+    if (!name) return showToast("Введите название!");
+    const snap = await get(ref(db, `rooms/${name}`));
+    if (!snap.exists()) return showToast("Комната не найдена!");
+    const data = snap.val();
+    currentRoom = name;
+    if (localStorage.getItem('cellsGame_room') === currentRoom) {
+        myRole = localStorage.getItem('cellsGame_role');
     } else {
-        gameEndedAlertShown = false;
-        diceResult.innerText = (currentTurn === myRole) ? `Ваш ход! (${data.lastDice || '?'})` : `Ждем противника...`;
+        if (!data.players?.red) myRole = 'red';
+        else if (!data.players?.blue) myRole = 'blue';
+        else return showToast("Комната полна!");
     }
-});
+    localStorage.setItem('cellsGame_room', currentRoom);
+    localStorage.setItem('cellsGame_role', myRole);
+    await update(ref(db, `rooms/${currentRoom}/players`), { [myRole]: true });
+    startGame();
+};
 
-function canPlaceRectangle(x, y, w, h) {
-    if (isNaN(x) || isNaN(y)) return false;
-    if (x < 0 || y < 0 || x + w > 20 || y + h > 20) return false;
-    for (let i = y; i < y + h; i++) {
-        for (let j = x; j < x + w; j++) {
-            if (occupiedGrid[i][j]) return false;
-        }
-    }
-    return true;
+function startGame() {
+    lobbyScreen.style.display = 'none';
+    gameInterface.style.display = 'flex';
+    document.getElementById('display-room-name').innerText = currentRoom;
+    roleDisplay.innerText = `Вы играете за: ${myRole === 'red' ? 'КРАСНЫХ' : 'СИНИХ'}`;
+    roleDisplay.style.color = myRole === 'red' ? '#e84393' : '#0984e3';
+    initRoomListener();
 }
 
-function canFitAnywhere(w, h) {
-    for (let y = 0; y <= 20 - h; y++) {
-        for (let x = 0; x <= 20 - w; x++) {
-            if (canPlaceRectangle(x, y, w, h)) return true;
+function generateMapMask(type) {
+    let mask = Array(20).fill().map(() => Array(20).fill(1));
+    if (type === 'octagon') {
+        const cut = 5;
+        for (let y = 0; y < 20; y++) {
+            for (let x = 0; x < 20; x++) {
+                if (x + y < cut || (19 - x) + y < cut || x + (19 - y) < cut || (19 - x) + (19 - y) < cut) mask[y][x] = 0;
+            }
         }
-    }
-    if (w !== h) {
-        for (let y = 0; y <= 20 - w; y++) {
-            for (let x = 0; x <= 20 - h; x++) {
-                if (canPlaceRectangle(x, y, h, w)) return true;
+    } else if (type === 'donut') {
+        for (let y = 6; y <= 13; y++) { for (let x = 6; x <= 13; x++) mask[y][x] = 0; }
+    } else if (type === 'cross') {
+        for (let y = 0; y < 20; y++) {
+            for (let x = 0; x < 20; x++) {
+                if ((x < 6 && y < 6) || (x > 13 && y < 6) || (x < 6 && y > 13) || (x > 13 && y > 13)) mask[y][x] = 0;
+            }
+        }
+    } else if (type === 'fortress') {
+        for (let y = 0; y < 20; y++) {
+            for (let x = 0; x < 20; x++) {
+                if (x >= 8 && x <= 11 && y < 6) mask[y][x] = 0;
+                if (x >= 8 && x <= 11 && y > 13) mask[y][x] = 0;
+                if (y >= 8 && y <= 11 && x < 6) mask[y][x] = 0;
+                if (y >= 8 && y <= 11 && x > 13) mask[y][x] = 0;
             }
         }
     }
-    return false;
+    return mask;
 }
 
-window.rollDice = function() {
-    if (currentTurn !== myRole) return alert("Сейчас ход противника!");
-    if (activeRectElement) return alert("Фигура уже готова!");
+function initRoomListener() {
+    onValue(ref(db, `rooms/${currentRoom}`), (snapshot) => {
+        if (!snapshot.exists()) { localStorage.clear(); location.reload(); return; }
+        const data = snapshot.val();
+        currentTurn = data.turn || 'red';
+        currentGameState = data.gameState || 'playing';
+        currentMapType = data.mapType || 'square';
+        currentMode = data.gameMode || 'classic';
+        const figures = data.figures || {};
+
+        mapMask = generateMapMask(currentMapType);
+        occupiedGrid = Array(20).fill().map(() => Array(20).fill(null));
+        gridElement.innerHTML = '';
+        
+        for (let y = 0; y < 20; y++) {
+            for (let x = 0; x < 20; x++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                if (mapMask[y][x] === 0) cell.classList.add('void');
+                if (currentMode === 'connected') {
+                    if (x === 0 && mapMask[y][x] === 1) cell.classList.add('start-red');
+                    if (x === 19 && mapMask[y][x] === 1) cell.classList.add('start-blue');
+                }
+                gridElement.appendChild(cell);
+            }
+        }
+
+        let rScore = 0, bScore = 0;
+        const cellSize = gridElement.clientWidth / 20;
+        for (let id in figures) {
+            const f = figures[id];
+            const rect = document.createElement('div');
+            rect.className = 'rectangle fixed';
+            rect.style.width = `${f.width * cellSize}px`;
+            rect.style.height = `${f.height * cellSize}px`;
+            rect.style.left = `${f.x * cellSize}px`;
+            rect.style.top = `${f.y * cellSize}px`;
+            rect.style.backgroundColor = f.color === 'red' ? '#e84393' : '#0984e3';
+            gridElement.appendChild(rect);
+            for (let i = f.y; i < f.y + f.height; i++) {
+                for (let j = f.x; j < f.x + f.width; j++) occupiedGrid[i][j] = f.color;
+            }
+            f.color === 'red' ? rScore += f.width * f.height : bScore += f.width * f.height;
+        }
+
+        document.getElementById('red').innerText = `Красных: ${rScore}`;
+        document.getElementById('blue').innerText = `Синих: ${bScore}`;
+
+        if (data.pendingDice && data.pendingDice.player === myRole) {
+            if (!activeRectElement) {
+                currentDice = { w: data.pendingDice.w, h: data.pendingDice.h };
+                createDraggable(currentDice.w, currentDice.h);
+            }
+        }
+
+        if (currentGameState === 'finished') {
+            diceResult.innerText = "ФИНАЛ";
+            if (!gameEndedAlertShown) {
+                gameEndedAlertShown = true;
+                const winText = rScore > bScore ? "Победили КРАСНЫЕ" : (bScore > rScore ? "Победили СИНИЕ" : "НИЧЬЯ");
+                const msg = `Выпала фигура ${data.lastDice}.\nМеста больше нет!\n${winText}\nСчет: ${rScore} : ${bScore}`;
+                
+                // Исправленный вызов модалки для конца игры
+                showModal("ИГРА ОКОНЧЕНА", msg, "Сыграть снова", "Выйти в лобби").then(res => {
+                    if (res === true) resetGameLogic(true); 
+                    else if (res === false) resetGameLogic(false);
+                });
+            }
+        } else {
+            gameEndedAlertShown = false;
+            diceResult.innerText = (currentTurn === myRole) ? `Ваш ход! (${data.lastDice})` : `Ждем противника...`;
+        }
+    });
+}
+
+window.rollDice = async function() {
+    if (currentGameState === 'finished') return;
+    if (currentTurn !== myRole) return showToast("Сейчас ход противника!");
+    
+    const snap = await get(ref(db, `rooms/${currentRoom}/pendingDice`));
+    if ((snap.exists() && snap.val().player === myRole) || activeRectElement) {
+        return showToast("Вы уже бросили кубики!");
+    }
 
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
     currentDice = { w: d1, h: d2 };
-
+    
     if (!canFitAnywhere(d1, d2)) {
-        update(ref(db), { gameState: "finished", lastDice: `${d1}x${d2}` });
-        return;
+        update(ref(db, `rooms/${currentRoom}`), { gameState: "finished", lastDice: `${d1}x${d2}` });
+    } else {
+        await update(ref(db, `rooms/${currentRoom}`), { 
+            lastDice: `${d1}x${d2}`,
+            pendingDice: { w: d1, h: d2, player: myRole }
+        });
     }
-
-    update(ref(db), { lastDice: `${d1}x${d2}` });
-    createDraggableRectangle(d1, d2);
 };
 
-function createDraggableRectangle(w, h) {
-    const cellSize = getCellSize();
-    activeRectElement = document.createElement('div');
-    activeRectElement.classList.add('rectangle');
-    activeRectElement.style.width = `${w * cellSize}px`;
-    activeRectElement.style.height = `${h * cellSize}px`;
-    activeRectElement.style.backgroundColor = myRole === 'red' ? '#e84351' : '#0960e3';
-    
-    previewZone.innerHTML = '';
-    previewZone.appendChild(activeRectElement);
-    confirmBtn.style.display = 'block';
-
-    let isDragging = false;
-    let isOnGrid = false;
-
-    activeRectElement.onpointerdown = (e) => {
-        isDragging = true;
-        activeRectElement.setPointerCapture(e.pointerId);
-    };
-
-    activeRectElement.onpointermove = (e) => {
-        if (!isDragging) return;
-
-        if (!isOnGrid) {
-            gridElement.appendChild(activeRectElement);
-            isOnGrid = true;
+function canPlace(x, y, w, h, role) {
+    if (x < 0 || y < 0 || x + w > 20 || y + h > 20) return false;
+    let touchesSelf = false, touchesStart = false;
+    for (let i = y; i < y + h; i++) {
+        for (let j = x; j < x + w; j++) {
+            if (occupiedGrid[i][j] !== null || mapMask[i][j] === 0) return false;
+            if (currentMode === 'connected') {
+                if (role === 'red' && j === 0) touchesStart = true;
+                if (role === 'blue' && j + 1 === 20) touchesStart = true;
+                [[i-1,j],[i+1,j],[i,j-1],[i,j+1]].forEach(([ny,nx]) => {
+                    if (ny>=0 && ny<20 && nx>=0 && nx<20 && occupiedGrid[ny][nx]===role) touchesSelf = true;
+                });
+            }
         }
-
-        const rect = gridElement.getBoundingClientRect();
-        const curCellSize = getCellSize();
-
-        let x = e.clientX - rect.left - (currentDice.w * curCellSize) / 2;
-        let y = e.clientY - rect.top - (currentDice.h * curCellSize) / 2;
-
-        let gridX = Math.round(x / curCellSize) * curCellSize;
-        let gridY = Math.round(y / curCellSize) * curCellSize;
-
-        gridX = Math.max(0, Math.min(gridX, (20 - currentDice.w) * curCellSize));
-        gridY = Math.max(0, Math.min(gridY, (20 - currentDice.h) * curCellSize));
-
-        activeRectElement.style.left = `${gridX}px`;
-        activeRectElement.style.top = `${gridY}px`;
-    };
-
-    activeRectElement.onpointerup = () => {
-        isDragging = false;
-    };
+    }
+    return currentMode === 'connected' ? (occupiedGrid.flat().some(c => c === role) ? touchesSelf : touchesStart) : true;
 }
 
-confirmBtn.onclick = () => {
-    if (!activeRectElement || activeRectElement.parentElement !== gridElement) {
-        return alert("Перетащите фигуру на поле!");
+function canFitAnywhere(w, h) {
+    for (let y = 0; y <= 20-h; y++) {
+        for (let x = 0; x <= 20-w; x++) if (canPlace(x, y, w, h, myRole)) return true;
     }
-
-    const curCellSize = getCellSize();
-    const x = Math.round(parseInt(activeRectElement.style.left) / curCellSize);
-    const y = Math.round(parseInt(activeRectElement.style.top) / curCellSize);
-    
-    if (!canPlaceRectangle(x, y, currentDice.w, currentDice.h)) {
-        return alert("Место занято!");
+    for (let y = 0; y <= 20-w; y++) {
+        for (let x = 0; x <= 20-h; x++) if (canPlace(x, y, h, w, myRole)) return true;
     }
+    return false;
+}
 
+function createDraggable(w, h) {
+    if (activeRectElement) activeRectElement.remove();
+    const cs = gridElement.clientWidth / 20;
+    activeRectElement = document.createElement('div');
+    activeRectElement.className = 'rectangle';
+    activeRectElement.style.width = `${w * cs}px`;
+    activeRectElement.style.height = `${h * cs}px`;
+    activeRectElement.style.backgroundColor = myRole === 'red' ? '#e84393' : '#0984e3';
+    previewZone.innerHTML = ''; previewZone.appendChild(activeRectElement);
+    confirmBtn.style.display = 'block';
+
+    let isDragging = false, isOnGrid = false;
+    activeRectElement.onpointerdown = (e) => { isDragging = true; activeRectElement.setPointerCapture(e.pointerId); };
+    activeRectElement.onpointermove = (e) => {
+        if (!isDragging) return;
+        if (!isOnGrid) { gridElement.appendChild(activeRectElement); isOnGrid = true; }
+        const rect = gridElement.getBoundingClientRect();
+        const csNow = gridElement.clientWidth / 20;
+        let x = Math.round((e.clientX - rect.left - (currentDice.w * csNow) / 2) / csNow) * csNow;
+        let y = Math.round((e.clientY - rect.top - (currentDice.h * csNow) / 2) / csNow) * csNow;
+        x = Math.max(0, Math.min(x, (20 - currentDice.w) * csNow));
+        y = Math.max(0, Math.min(y, (20 - currentDice.h) * csNow));
+        activeRectElement.style.left = x + 'px'; activeRectElement.style.top = y + 'px';
+    };
+    activeRectElement.onpointerup = () => isDragging = false;
+}
+
+confirmBtn.onclick = async () => {
+    if (!activeRectElement || activeRectElement.parentElement !== gridElement) return showToast("Перетащите фигуру!");
+    const cs = gridElement.clientWidth / 20;
+    const x = Math.round(parseInt(activeRectElement.style.left) / cs);
+    const y = Math.round(parseInt(activeRectElement.style.top) / cs);
+    if (!canPlace(x, y, currentDice.w, currentDice.h, myRole)) return showToast("Тут нельзя ставить!");
     const updates = {};
-    const key = `fig_${Date.now()}`;
-    updates[`/figures/${key}`] = { x, y, width: currentDice.w, height: currentDice.h, color: myRole };
-    updates[`/turn`] = myRole === 'red' ? 'blue' : 'red';
-
-    update(ref(db), updates).then(() => {
-        activeRectElement.remove();
-        activeRectElement = null;
-        confirmBtn.style.display = 'none';
-        previewZone.innerHTML = '';
-    });
+    updates[`figures/fig_${Date.now()}`] = { x, y, width: currentDice.w, height: currentDice.h, color: myRole };
+    updates[`turn`] = myRole === 'red' ? 'blue' : 'red';
+    updates[`pendingDice`] = null;
+    await update(ref(db, `rooms/${currentRoom}`), updates);
+    activeRectElement.remove(); activeRectElement = null; confirmBtn.style.display = 'none';
 };
 
 document.getElementById("rotateButton").onclick = () => {
     if (!activeRectElement) return;
-    const curCellSize = getCellSize();
+    const cs = gridElement.clientWidth / 20;
     [currentDice.w, currentDice.h] = [currentDice.h, currentDice.w];
-
-    activeRectElement.style.width = `${currentDice.w * curCellSize}px`;
-    activeRectElement.style.height = `${currentDice.h * curCellSize}px`;
-
+    activeRectElement.style.width = currentDice.w * cs + 'px';
+    activeRectElement.style.height = currentDice.h * cs + 'px';
     if (activeRectElement.parentElement === gridElement) {
-        let lx = parseInt(activeRectElement.style.left) || 0;
-        let ty = parseInt(activeRectElement.style.top) || 0;
-        lx = Math.max(0, Math.min(lx, (20 - currentDice.w) * curCellSize));
-        ty = Math.max(0, Math.min(ty, (20 - currentDice.h) * curCellSize));
-        activeRectElement.style.left = `${lx}px`;
-        activeRectElement.style.top = `${ty}px`;
+        let lx = Math.min(parseInt(activeRectElement.style.left), (20 - currentDice.w) * cs);
+        let ty = Math.min(parseInt(activeRectElement.style.top), (20 - currentDice.h) * cs);
+        activeRectElement.style.left = lx + 'px'; activeRectElement.style.top = ty + 'px';
     }
 };
 
-window.resetGame = function() {
-    if (confirm("Сбросить игру?")) {
-        set(ref(db), { turn: 'red', figures: {}, lastDice: '?', gameState: 'playing' })
-        .then(() => location.reload());
-    }
+function showModal(title, message, okT, canT) {
+    return new Promise((res) => {
+        const ov = document.getElementById('custom-modal-overlay');
+        const modal = document.getElementById('custom-modal');
+        document.getElementById('modal-title').innerText = title;
+        document.getElementById('modal-message').innerText = message;
+        document.getElementById('modal-ok').innerText = okT;
+        document.getElementById('modal-cancel').innerText = canT;
+        document.getElementById('modal-cancel').style.display = canT ? 'block' : 'none';
+        ov.style.display = 'flex';
+        setTimeout(() => modal.classList.add('show'), 10);
+        document.getElementById('modal-ok').onclick = () => { modal.classList.remove('show'); setTimeout(()=>ov.style.display='none', 200); res(true); };
+        document.getElementById('modal-cancel').onclick = () => { modal.classList.remove('show'); setTimeout(()=>ov.style.display='none', 200); res(false); };
+        document.getElementById('modal-close').onclick = () => { modal.classList.remove('show'); setTimeout(()=>ov.style.display='none', 200); res(null); };
+    });
+}
+
+window.handleManualReset = async function() {
+    const res = await showModal("Меню", "Что вы хотите сделать?", "Очистить карту", "Выйти в лобби");
+    if (res !== null) resetGameLogic(res);
 };
+
+async function resetGameLogic(replay) {
+    if (replay === true) {
+        await set(ref(db, `rooms/${currentRoom}`), {
+            gameState: 'playing', mapType: currentMapType, gameMode: currentMode, turn: 'red', lastDice: '?', players: { red: true, blue: true }
+        });
+        location.reload();
+    } else if (replay === false) {
+        await remove(ref(db, `rooms/${currentRoom}`));
+        localStorage.clear();
+        location.reload();
+    }
+}
