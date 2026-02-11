@@ -2,37 +2,100 @@
 <html lang="ru">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=yes">
+    <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
     <link rel="stylesheet" href="styles.css" />
-    <title>CellsGame</title>
+    <title>CellsGame Online</title>
 </head>
 <body>
-    <h1>Клетки</h1>
+    <div id="toast-container"></div>
 
-    <div class="controls">
-        <button id = "upperButton" onclick="rollDice()">Бросить кубики</button>
-        <span id="diceResult">?</span>
-        <button  id ="rotateButton">Повернуть</button>
-        <button id = "upperButton" onclick="resetGame()">🔄 Перезапустить игру</button>
-    </div>
-    
-    <div class="grid" id="grid"></div>
+    <!-- ЛОББИ -->
+    <div id="lobby-screen">
+        <div class="lobby-card">
+            <h2 class="lobby-title">CellsGame Online</h2>
+            
+            <div id="lobby-main-step">
+                <input type="text" id="room-input" placeholder="Название комнаты..." autocomplete="off">
+                <div class="lobby-actions">
+                    <button id="btn-create-room" class="btn-primary">Создать</button>
+                    <button id="btn-join-room" class="btn-success">Присоединиться</button>
+                </div>
+            </div>
 
-    <div class="stats">
-        <span id="red">Красных клеток</span>
-        <span id="blue">Синих клеток</span>
-    </div>
+            <div id="creator-settings" style="display: none;" class="fade-in">
+                <div class="setting-group">
+                    <label>Выберите карту:</label>
+                    <select id="map-select">
+                        <option value="square">Классический квадрат</option>
+                        <option value="octagon">Арена (Октагон)</option>
+                        <option value="donut">Кольцо (Пончик)</option>
+                        <option value="cross">Греческий крест</option>
+                        <option value="fortress">Крепость</option>
+                    </select>
+                </div>
+                
+                <div class="setting-group">
+                    <label>Режим игры: <span id="info-mode" class="info-icon">❓</span></label>
+                    <select id="mode-select">
+                        <option value="classic">Классика (везде)</option>
+                        <option value="connected">Связность (от краев)</option>
+                    </select>
+                </div>
 
-    <div id="preview-container">
-        <p>Ваша фигура:</p>
-        <div class="preview-row">
-            <div id="preview-zone"></div>
-            <button id="confirmMoveButton">ПОСТАВИТЬ</button>
+                <div class="setting-group">
+                    <label>Ваша сторона:</label>
+                    <div class="setup-buttons-row">
+                        <button id="pick-red" class="btn-red">Я КРАСНЫЙ</button>
+                        <button id="pick-blue" class="btn-blue">Я СИНИЙ</button>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <script type="module" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js"></script>
-    <script type="module" src="https://www.gstatic.com/firebasejs/9.6.1/firebase-database.js"></script>
+    <!-- ИГРОВОЙ ИНТЕРФЕЙС -->
+    <div id="game-interface" style="display: none;">
+        <div id="player-info-bar">
+            <span>Комната: <b id="display-room-name">...</b></span>
+            <span id="my-role-display">Вы играете за: ...</span>
+        </div>
+        
+        <div class="controls">
+            <button id="upperButton" onclick="rollDice()">Бросить кубики</button>
+            <span id="diceResult">?</span>
+            <button id="rotateButton">Повернуть</button>
+            <button id="resetButton" onclick="handleManualReset()">🔄</button>
+        </div>
+
+        <div id="grid"></div>
+
+        <div class="stats">
+            <span id="red">Красных: 0</span>
+            <span id="blue">Синих: 0</span>
+        </div>
+
+        <div id="preview-container">
+            <p>Ваша фигура:</p>
+            <div class="preview-row">
+                <div id="preview-zone"></div>
+                <button id="confirmMoveButton">ПОСТАВИТЬ</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- МОДАЛЬНОЕ ОКНО -->
+    <div id="custom-modal-overlay">
+        <div id="custom-modal">
+            <button id="modal-close">×</button>
+            <h2 id="modal-title"></h2>
+            <p id="modal-message" style="white-space: pre-wrap;"></p>
+            <div id="modal-buttons">
+                <button id="modal-ok"></button>
+                <button id="modal-cancel"></button>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="script.js"></script>
 </body>
 </html>
