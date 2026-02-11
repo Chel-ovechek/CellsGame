@@ -1,146 +1,66 @@
+:root {
+    --primary: #6c5ce7; --success: #00b894; --red: #e84393;
+    --blue: #0984e3; --dark: #2c3e50; --bg: #f0f2f5;
+}
+
 body {
-    font-family: Arial, sans-serif;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    margin: 0;
-    padding: 5px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    background-color: #f8f9fa;
-    touch-action: manipulation;
+    font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column;
+    align-items: center; margin: 0; padding: 10px; background-color: var(--bg);
+    touch-action: none; overflow-x: hidden;
 }
 
-h1 {
-    font-size: 1.2rem;
-    margin: 5px 0;
+#lobby-screen {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(135deg, rgba(44, 62, 80, 0.95), rgba(52, 152, 219, 0.95));
+    backdrop-filter: blur(8px); display: flex; justify-content: center; align-items: center; z-index: 5000;
 }
+.lobby-card { background: white; padding: 30px; border-radius: 24px; width: 90%; max-width: 380px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+.lobby-title { margin-bottom: 20px; font-size: 1.8rem; font-weight: 800; }
+#room-input { width: 100%; padding: 12px; font-size: 18px; border: 2px solid #eee; border-radius: 12px; margin-bottom: 20px; box-sizing: border-box; outline: none; }
+.lobby-actions, .setup-buttons-row { display: flex; gap: 10px; justify-content: center; }
+.btn-primary { background: var(--primary); color: white; flex: 1; }
+.btn-success { background: var(--success); color: white; flex: 1; }
+.btn-red { background: var(--red); color: white; flex: 1; }
+.btn-blue { background: var(--blue); color: white; flex: 1; }
+.btn-primary, .btn-success, .btn-red, .btn-blue { padding: 12px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; }
+.setting-group { margin-top: 15px; text-align: left; }
+.setting-group label { display: block; margin-bottom: 5px; font-weight: bold; font-size: 13px; color: #7f8c8d; }
+#map-select, #mode-select { width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #ddd; outline: none; }
+.info-icon { display: inline-block; width: 18px; height: 18px; background: #eee; border-radius: 50%; text-align: center; line-height: 18px; cursor: pointer; font-size: 12px; }
 
-.controls {
-    margin-bottom: 5px;
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 8px;
-}
+#game-interface { display: none; flex-direction: column; align-items: center; width: 100%; }
+#player-info-bar { background: white; padding: 10px 20px; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); margin-bottom: 10px; display: flex; gap: 15px; font-size: 0.9rem; }
+#my-role-display { font-weight: bold; }
+.controls { display: flex; gap: 8px; margin-bottom: 15px; align-items: center; }
+#grid { display: grid; grid-template-columns: repeat(20, 20px); grid-template-rows: repeat(20, 20px); background: #333; position: relative; padding: 1px; border: 2px solid #222; }
+.cell { width: 20px; height: 20px; background: #fff; outline: 1px solid #eee; box-sizing: border-box; }
+.cell.void { background: transparent !important; outline: none; border: none; }
+.cell.start-red { border-left: 3px solid var(--red) !important; }
+.cell.start-blue { border-right: 3px solid var(--blue) !important; }
+.rectangle { position: absolute; border: 1px solid rgba(0,0,0,0.4); box-sizing: border-box; opacity: 0.4; cursor: grab; z-index: 10; transition: opacity 0.2s; }
+.fixed { opacity: 0.8; cursor: default; z-index: 5; }
+#upperButton, #rotateButton, #resetButton { padding: 10px 15px; background: var(--primary); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
+#resetButton { background: #bdc3c7; }
+.stats { margin: 10px 0; font-weight: bold; display: flex; gap: 30px; }
+#red { color: var(--red); } #blue { color: var(--blue); }
+#preview-container { display: flex; flex-direction: column; align-items: center; }
+.preview-row { display: flex; gap: 15px; align-items: center; }
+#preview-zone { width: 100px; height: 100px; background: white; border: 2px dashed #ccc; border-radius: 15px; position: relative; display: flex; align-items: center; justify-content: center; }
+#confirmMoveButton { padding: 12px 20px; background: var(--success); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; display: none; }
 
-#grid {
-    display: grid;
-    grid-template-columns: repeat(20, 20px);
-    grid-template-rows: repeat(20, 20px);
-    background-color: #444;
-    position: relative;
-    padding: 1px;
-    border: 1px solid #222;
-    touch-action: none;
-}
+#toast-container { position: fixed; top: 20px; z-index: 10000; pointer-events: none; display: flex; flex-direction: column; align-items: center; width: 100%; }
+.toast { background: rgba(0,0,0,0.85); color: white; padding: 10px 20px; border-radius: 20px; margin-bottom: 8px; font-size: 14px; animation: slideDown 0.3s; }
+@keyframes slideDown { from { transform: translateY(-50px); } to { transform: translateY(0); } }
 
-.cell {
-    width: 20px;
-    height: 20px;
-    background-color: #fff;
-    /* Тонкие линии сетки */
-    outline: 1px solid #eee;
-    box-sizing: border-box;
-}
+#custom-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 9000; }
+#custom-modal { background: white; padding: 25px; border-radius: 20px; width: 85%; max-width: 340px; text-align: center; position: relative; transform: scale(0.9); transition: 0.2s; }
+#custom-modal.show { transform: scale(1); }
+#modal-close { position: absolute; top: 10px; right: 15px; background: none; border: none; font-size: 22px; cursor: pointer; color: #bbb; }
+#modal-buttons { display: flex; flex-direction: column; gap: 8px; margin-top: 15px; }
+#modal-ok { padding: 12px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; }
+#modal-cancel { padding: 12px; background: #eee; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; }
 
-.rectangle {
-    position: absolute;
-    /* Тонкая рамка фигур */
-    border: 1px solid rgba(0,0,0,0.4);
-    box-sizing: border-box;
-    cursor: grab;
-    opacity: 0.5; /* Активная фигура прозрачнее */
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    touch-action: none;
-    user-select: none;
-    transition: opacity 0.2s;
-}
-
-.fixed {
-    cursor: default;
-    opacity: 0.7; /* Поставленные фигуры чуть прозрачные */
-    border: 1px solid rgba(0,0,0,0.2);
-}
-
-#upperButton, #rotateButton {
-    padding: 8px 12px;
-    background-color: #6c5ce7;
-    color: white;
-    border: none;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: bold;
-}
-
-.stats {
-    margin: 5px 0;
-    display: flex;
-    gap: 15px;
-    font-size: 14px;
-    font-weight: bold;
-}
-
-#red { color: #e84351; }
-#blue { color: #0960e3; }
-
-/* Контейнер превью и кнопки подтверждения */
-#preview-container {
-    margin-top: 5px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    width: 100%;
-}
-
-#preview-container p {
-    margin: 0 0 5px 0;
-    font-size: 14px;
-}
-
-.preview-row {
-    display: flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: center;
-    gap: 15px; /* Отступ между превью и кнопкой */
-}
-
-#preview-zone {
-    width: 100px;
-    height: 100px;
-    background-color: #eee;
-    border: 1px dashed #bbb;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-#confirmMoveButton {
-    padding: 12px 20px;
-    font-size: 16px;
-    background-color: #00b894;
-    color: white;
-    border: none;
-    border-radius: 6px;
-    cursor: pointer;
-    font-weight: bold;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-    display: none; /* Скрыта по умолчанию */
-}
-
-/* АДАПТАЦИЯ ДЛЯ МОБИЛЬНЫХ */
 @media screen and (max-width: 450px) {
-    #grid {
-        grid-template-columns: repeat(20, 16px);
-        grid-template-rows: repeat(20, 16px);
-    }
-    .cell {
-        width: 16px;
-        height: 16px;
-    }
+    #grid { grid-template-columns: repeat(20, 16px); grid-template-rows: repeat(20, 16px); }
+    .cell { width: 16px; height: 16px; }
 }
