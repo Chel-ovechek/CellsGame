@@ -2,77 +2,91 @@
     --primary: #6c5ce7; --success: #00b894; --red: #e84393;
     --blue: #0984e3; --dark: #2c3e50; --bg: #f0f2f5;
 }
+
+.noselect { user-select: none; -webkit-user-select: none; }
+
 body {
     font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column;
-    align-items: center; margin: 0; padding: 10px; background: var(--bg);
+    align-items: center; margin: 0; padding: 5px; background-color: var(--bg);
     touch-action: none; overflow: hidden;
 }
-#game-interface { display: none; flex-direction: column; align-items: center; width: 100%; z-index: 10; }
 
-/* Сетка и Клетки */
+/* Лобби */
+#lobby-screen {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: linear-gradient(135deg, var(--dark), #34495e);
+    display: flex; justify-content: center; align-items: center; z-index: 5000;
+}
+.lobby-card {
+    background: white; padding: 35px 25px; border-radius: 28px; width: 85%; 
+    max-width: 400px; text-align: center; box-shadow: 0 20px 50px rgba(0,0,0,0.4);
+}
+.lobby-title { margin-bottom: 25px; font-weight: 800; color: var(--dark); font-size: 1.8rem; }
+#room-input { width: 100%; padding: 15px; border-radius: 12px; border: 2px solid #eee; margin-bottom: 20px; outline: none; font-size: 18px; box-sizing: border-box; text-align: center; }
+.lobby-actions, .setup-buttons-row { display: flex; gap: 12px; }
+.btn-primary, .btn-success, .btn-red, .btn-blue { padding: 15px; border: none; border-radius: 12px; font-weight: bold; cursor: pointer; flex: 1; color: white; font-size: 16px; }
+.btn-primary { background: var(--primary); } .btn-success { background: var(--success); } .btn-red { background: var(--red); } .btn-blue { background: var(--blue); }
+.btn-back { margin-top: 20px; background: none; border: none; color: #999; cursor: pointer; font-size: 13px; text-decoration: underline; }
+
+.setting-group { margin-top: 20px; text-align: left; }
+.setting-group label { display: block; font-weight: bold; font-size: 14px; color: #7f8c8d; margin-bottom: 8px; }
+#map-select, #mode-select { width: 100%; padding: 12px; border-radius: 12px; border: 2px solid #eee; outline: none; background: #fff; }
+.info-icon { display: inline-block; width: 22px; height: 22px; background: #f0f0f0; border-radius: 50%; text-align: center; line-height: 22px; cursor: pointer; font-size: 12px; vertical-align: middle; }
+
+/* Игровой интерфейс */
+#game-interface { display: none; flex-direction: column; align-items: center; width: 100%; }
+#player-info-bar { 
+    background: white; padding: 10px 15px; border-radius: 15px; margin-bottom: 12px; 
+    display: flex; gap: 12px; font-size: 0.85rem; box-shadow: 0 4px 10px rgba(0,0,0,0.05);
+    align-items: center; justify-content: center; width: 95%; max-width: 500px;
+}
+#turn-display { font-weight: 800; padding: 5px 15px; border-radius: 8px; color: black; transition: all 0.3s ease; text-transform: uppercase; }
+
+.controls { display: flex; gap: 8px; margin-bottom: 25px; align-items: center; }
 #grid { display: grid; grid-template-columns: repeat(20, 20px); grid-template-rows: repeat(20, 20px); background: #333; position: relative; padding: 1px; border: 2px solid #222; }
 .cell { width: 20px; height: 20px; background: #fff; outline: 1px solid #eee; box-sizing: border-box; }
 .cell.void { background: transparent !important; outline: none; border: none; }
+.cell.start-red { border-left: 4px solid var(--red) !important; }
+.cell.start-blue { border-right: 4px solid var(--blue) !important; }
 
-/* Исправленные стартовые зоны (без темных пятен) */
-.cell.start-red { border-left: 4px solid var(--red) !important; background-color: #fff9fb; }
-.cell.start-blue { border-right: 4px solid var(--blue) !important; background-color: #f9fcff; }
-
-/* Фигуры */
-.rectangle { position: absolute; border: 1px solid rgba(0,0,0,0.4); box-sizing: border-box; opacity: 0.4; cursor: grab; z-index: 100; transition: opacity 0.2s; }
+.rectangle { position: absolute; border: 1px solid rgba(0,0,0,0.4); box-sizing: border-box; opacity: 0.4; cursor: grab; z-index: 1000; }
 .fixed { opacity: 0.8; cursor: default; z-index: 50; }
-.fixed.targetable { outline: 2px solid #f1c40f; outline-offset: 2px; cursor: pointer; animation: pulse 1s infinite; z-index: 200; }
-@keyframes pulse { 0% { opacity: 0.8; } 50% { opacity: 0.4; } 100% { opacity: 0.8; } }
+.fixed.targetable { outline: 3px solid #f1c40f; animation: pulse 1s infinite; cursor: pointer; }
 
-/* Интерфейс */
-#player-info-bar { background: white; padding: 10px 20px; border-radius: 12px; margin-bottom: 10px; display: flex; gap: 15px; font-size: 0.9rem; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
-.controls { display: flex; gap: 8px; margin-bottom: 15px; }
-#upperButton, #rotateButton, #resetButton { padding: 10px 15px; background: var(--primary); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
+#upperButton, #rotateButton, #resetButton { padding: 12px 18px; background: var(--primary); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; }
 #resetButton { background: #bdc3c7; }
-.stats { margin: 10px 0; font-weight: bold; display: flex; gap: 30px; }
+.stats { margin: 10px 0; font-weight: bold; display: flex; gap: 30px; font-size: 1.1rem; }
 .stat-item { display: flex; flex-direction: column; align-items: center; }
-.energy-val { font-size: 14px; color: #f39c12; font-weight: 800; }
+.energy-val { font-size: 15px; color: #f39c12; font-weight: 800; }
 
-#ability-bar { display: flex; gap: 5px; margin-bottom: 10px; }
-#ability-bar button { padding: 8px 10px; border-radius: 8px; border: 1px solid #ddd; cursor: pointer; font-size: 11px; font-weight: bold; background: white; }
-#ability-bar button:disabled { opacity: 0.4; cursor: not-allowed; }
+#ability-bar { display: flex; gap: 8px; margin-bottom: 12px; }
+#ability-bar button { padding: 10px 14px; border-radius: 10px; border: 1px solid #ddd; cursor: pointer; font-size: 12px; font-weight: bold; background: white; }
+#ability-bar button:disabled { background: #f5f5f5; color: #ccc; cursor: not-allowed; }
 
-/* Превью (увеличен размер до 130px для 6х6) */
-#preview-container { display: flex; flex-direction: column; align-items: center; }
-.preview-row { display: flex; gap: 15px; align-items: center; }
-#preview-zone { 
-    width: 130px; height: 130px; 
-    background: white; border: 2px dashed #ccc; 
-    border-radius: 15px; position: relative; 
-    display: flex; align-items: center; justify-content: center; 
-}
-#confirmMoveButton { padding: 12px 20px; background: var(--success); color: white; border: none; border-radius: 10px; cursor: pointer; font-weight: bold; display: none; }
+/* Превью КОНТЕЙНЕР - Кнопка СБОКУ */
+#preview-container { display: flex; flex-direction: column; align-items: center; margin-top: 5px; }
+.preview-row { display: flex; flex-direction: row; gap: 15px; align-items: center; justify-content: center; width: 100%; }
+#preview-zone { width: 130px; height: 130px; background: white; border: 2px dashed #ccc; border-radius: 20px; position: relative; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+#confirmMoveButton { padding: 20px 25px; background: var(--success); color: white; border: none; border-radius: 15px; cursor: pointer; font-weight: bold; display: none; box-shadow: 0 4px 12px rgba(0,184,148,0.3); font-size: 16px; }
 
-/* Лобби */
-#lobby-screen { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--dark); display: flex; justify-content: center; align-items: center; z-index: 5000; }
-.lobby-card { background: white; padding: 30px; border-radius: 24px; width: 90%; max-width: 380px; text-align: center; }
-#room-input { width: 100%; padding: 15px; border: 2px solid #eee; border-radius: 12px; margin-bottom: 15px; box-sizing: border-box; }
-.lobby-actions, .setup-buttons-row { display: flex; gap: 10px; }
-.btn-primary, .btn-success, .btn-red, .btn-blue { padding: 12px; border: none; border-radius: 10px; font-weight: bold; cursor: pointer; flex: 1; color: white; }
-.btn-primary { background: var(--primary); } .btn-success { background: var(--success); } .btn-red { background: var(--red); } .btn-blue { background: var(--blue); }
-.setting-group { margin-top: 15px; text-align: left; }
-.setting-group label { display: block; font-weight: bold; font-size: 13px; color: #777; margin-bottom: 5px; }
-.info-icon { display: inline-block; width: 18px; height: 18px; background: #eee; border-radius: 50%; text-align: center; line-height: 18px; cursor: pointer; font-size: 12px; }
+/* Минисообщения - ПОВЕРХ всего, не двигают контент */
+#toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 99999; pointer-events: none; display: flex; flex-direction: column; align-items: center; width: 90%; }
+.toast { background: rgba(44, 62, 80, 0.95); color: white; padding: 12px 25px; border-radius: 30px; margin-bottom: 8px; font-size: 14px; box-shadow: 0 8px 20px rgba(0,0,0,0.3); animation: slideDown 0.4s ease; text-align: center; }
+@keyframes slideDown { from { transform: translateY(-100px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 
-/* Системные */
-#custom-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 9000; }
-#custom-modal { background: white; padding: 25px; border-radius: 20px; width: 85%; max-width: 360px; text-align: center; position: relative; }
-#modal-buttons { display: flex; flex-direction: column; gap: 8px; margin-top: 15px; }
-#modal-ok { padding: 12px; background: var(--primary); color: white; border: none; border-radius: 10px; font-weight: bold; }
-#modal-cancel { padding: 12px; background: #eee; border: none; border-radius: 10px; font-weight: bold; }
-#modal-close { position: absolute; top: 10px; right: 15px; background: none; border: none; font-size: 24px; color: #ccc; cursor: pointer; }
-
-#toast-container { position: fixed; top: 20px; width: 100%; display: flex; flex-direction: column; align-items: center; pointer-events: none; z-index: 10000; }
-.toast { background: #333; color: white; padding: 10px 20px; border-radius: 20px; margin-bottom: 5px; font-size: 14px; animation: slideDown 0.3s; }
-@keyframes slideDown { from { transform: translateY(-50px); } to { transform: translateY(0); } }
+/* Модалка */
+#custom-modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); backdrop-filter: blur(4px); display: none; justify-content: center; align-items: center; z-index: 10000; }
+#custom-modal { background: white; padding: 30px; border-radius: 28px; width: 85%; max-width: 360px; text-align: center; position: relative; box-shadow: 0 20px 60px rgba(0,0,0,0.4); transform: scale(0.9); transition: 0.2s; }
+#custom-modal.show { transform: scale(1); }
+#modal-close { position: absolute; top: 15px; right: 20px; background: none; border: none; font-size: 28px; color: #ccc; cursor: pointer; }
+#modal-buttons { display: flex; flex-direction: column; gap: 10px; margin-top: 20px; }
+.modal-btn { padding: 15px; border: none; border-radius: 14px; font-weight: bold; cursor: pointer; font-size: 16px; }
+.btn-main { background: var(--primary); color: white; }
+.btn-sub { background: #eee; color: #333; }
 
 @media screen and (max-width: 450px) {
     #grid { grid-template-columns: repeat(20, 16px); grid-template-rows: repeat(20, 16px); }
     .cell { width: 16px; height: 16px; }
-    #preview-zone { width: 110px; height: 110px; } /* Чуть меньше для телефонов */
+    #preview-zone { width: 105px; height: 105px; }
+    #confirmMoveButton { padding: 15px 18px; font-size: 14px; }
 }
