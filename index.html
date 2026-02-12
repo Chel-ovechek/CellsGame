@@ -13,7 +13,6 @@
     <div id="lobby-screen">
         <div class="lobby-card">
             <h2 class="lobby-title">CellsGame Online</h2>
-            
             <div id="lobby-main-step">
                 <input type="text" id="room-input" placeholder="Название комнаты..." autocomplete="off">
                 <div class="lobby-actions">
@@ -21,7 +20,6 @@
                     <button id="btn-join-room" class="btn-success">Присоединиться</button>
                 </div>
             </div>
-
             <div id="creator-settings" style="display: none;" class="fade-in">
                 <div class="setting-group">
                     <label>Выберите карту:</label>
@@ -33,15 +31,14 @@
                         <option value="fortress">Крепость</option>
                     </select>
                 </div>
-                
                 <div class="setting-group">
-                    <label>Режим игры: <span id="info-mode" class="info-icon">❓</span></label>
+                    <label>Режим игры: <span id="info-mode" class="info-icon" onclick="showRules()">❓</span></label>
                     <select id="mode-select">
                         <option value="classic">Классика (везде)</option>
                         <option value="connected">Связность (от краев)</option>
+                        <option value="energy">Энергия (способности)</option>
                     </select>
                 </div>
-
                 <div class="setting-group">
                     <label>Ваша сторона:</label>
                     <div class="setup-buttons-row">
@@ -57,38 +54,50 @@
     <div id="game-interface" style="display: none;">
         <div id="player-info-bar">
             <span>Комната: <b id="display-room-name">...</b></span>
-            <span id="my-role-display">Вы играете за: ...</span>
+            <span id="my-role-display">Вы: ...</span>
         </div>
         
         <div class="controls">
             <button id="upperButton" onclick="rollDice()">Бросить кубики</button>
             <span id="diceResult">?</span>
-            <button id="rotateButton">Повернуть</button>
+            <button id="rotateButton" onclick="rotatePiece()">Повернуть</button>
             <button id="resetButton" onclick="handleManualReset()">🔄</button>
         </div>
 
         <div id="grid"></div>
 
         <div class="stats">
-            <span id="red">Красных: 0</span>
-            <span id="blue">Синих: 0</span>
+            <div class="stat-item">
+                <span id="red">Красных: 0</span>
+                <span id="red-energy" class="energy-val" style="display:none;">⚡0</span>
+            </div>
+            <div class="stat-item">
+                <span id="blue">Синих: 0</span>
+                <span id="blue-energy" class="energy-val" style="display:none;">⚡0</span>
+            </div>
+        </div>
+
+        <div id="ability-bar" style="display: none;">
+            <button onclick="useAbility('reroll')" id="ab-reroll">1⚡ Переброс</button>
+            <button onclick="useAbility('destroy')" id="ab-destroy">3⚡ Сжечь</button>
+            <button onclick="useAbility('max')" id="ab-max">5⚡ Архитектор</button>
         </div>
 
         <div id="preview-container">
-            <p>Ваша фигура:</p>
+            <p id="preview-label">Ваша фигура:</p>
             <div class="preview-row">
                 <div id="preview-zone"></div>
-                <button id="confirmMoveButton">ПОСТАВИТЬ</button>
+                <button id="confirmMoveButton" onclick="confirmMove()">ПОСТАВИТЬ</button>
             </div>
         </div>
     </div>
 
-    <!-- МОДАЛЬНОЕ ОКНО -->
+    <!-- МОДАЛКА -->
     <div id="custom-modal-overlay">
         <div id="custom-modal">
-            <button id="modal-close">×</button>
+            <button id="modal-close" onclick="closeModal()">×</button>
             <h2 id="modal-title"></h2>
-            <p id="modal-message" style="white-space: pre-wrap;"></p>
+            <p id="modal-message" style="white-space: pre-wrap; text-align: left; font-size: 14px;"></p>
             <div id="modal-buttons">
                 <button id="modal-ok"></button>
                 <button id="modal-cancel"></button>
