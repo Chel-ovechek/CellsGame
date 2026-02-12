@@ -6,20 +6,23 @@
     <link rel="stylesheet" href="styles.css" />
     <title>CellsGame Online</title>
 </head>
-<body>
+<body class="noselect">
+    <!-- Контейнер для уведомлений (теперь поверх всего) -->
     <div id="toast-container"></div>
 
     <!-- ЛОББИ -->
     <div id="lobby-screen">
         <div class="lobby-card">
             <h2 class="lobby-title">CellsGame Online</h2>
+            
             <div id="lobby-main-step">
                 <input type="text" id="room-input" placeholder="Название комнаты..." autocomplete="off">
                 <div class="lobby-actions">
                     <button id="btn-create-room" class="btn-primary">Создать</button>
-                    <button id="btn-join-room" class="btn-success">Присоединиться</button>
+                    <button id="btn-join-room" class="btn-success">Войти</button>
                 </div>
             </div>
+
             <div id="creator-settings" style="display: none;" class="fade-in">
                 <div class="setting-group">
                     <label>Выберите карту:</label>
@@ -31,21 +34,24 @@
                         <option value="fortress">Крепость</option>
                     </select>
                 </div>
+                
                 <div class="setting-group">
-                    <label>Режим игры: <span id="info-mode" class="info-icon" onclick="showRules()">❓</span></label>
+                    <label>Режим игры: <span class="info-icon" onclick="window.showRules()">❓</span></label>
                     <select id="mode-select">
                         <option value="classic">Классика (везде)</option>
                         <option value="connected">Связность (от краев)</option>
                         <option value="energy">Энергия (способности)</option>
                     </select>
                 </div>
+
                 <div class="setting-group">
                     <label>Ваша сторона:</label>
                     <div class="setup-buttons-row">
-                        <button id="pick-red" class="btn-red">Я КРАСНЫЙ</button>
-                        <button id="pick-blue" class="btn-blue">Я СИНИЙ</button>
+                        <button id="pick-red" class="btn-red">КРАСНЫЙ</button>
+                        <button id="pick-blue" class="btn-blue">СИНИЙ</button>
                     </div>
                 </div>
+                <button onclick="localStorage.clear(); location.reload();" class="btn-back">← Сменить комнату</button>
             </div>
         </div>
     </div>
@@ -54,6 +60,7 @@
     <div id="game-interface" style="display: none;">
         <div id="player-info-bar">
             <span>Комната: <b id="display-room-name">...</b></span>
+            <span id="turn-display">Ход: ...</span>
             <span id="my-role-display">Вы: ...</span>
         </div>
         
@@ -78,13 +85,12 @@
         </div>
 
         <div id="ability-bar" style="display: none;">
-            <button onclick="useAbility('reroll')" id="ab-reroll">1⚡ Переброс</button>
-            <button onclick="useAbility('destroy')" id="ab-destroy">3⚡ Сжечь</button>
-            <button onclick="useAbility('max')" id="ab-max">5⚡ Архитектор</button>
+            <button onclick="useAbility('reroll')" id="ab-reroll">2⚡ Переброс</button>
+            <button onclick="useAbility('destroy')" id="ab-destroy">4⚡ Сжечь</button>
+            <button onclick="useAbility('max')" id="ab-max">6⚡ Архитектор</button>
         </div>
 
         <div id="preview-container">
-            <p id="preview-label">Ваша фигура:</p>
             <div class="preview-row">
                 <div id="preview-zone"></div>
                 <button id="confirmMoveButton" onclick="confirmMove()">ПОСТАВИТЬ</button>
@@ -97,11 +103,23 @@
         <div id="custom-modal">
             <button id="modal-close" onclick="closeModal()">×</button>
             <h2 id="modal-title"></h2>
-            <p id="modal-message" style="white-space: pre-wrap; text-align: left; font-size: 14px;"></p>
-            <div id="modal-buttons">
-                <button id="modal-ok"></button>
-                <button id="modal-cancel"></button>
+            <p id="modal-message"></p>
+            
+            <!-- Дизайнерский UI Архитектора -->
+            <div id="architect-ui" style="display:none; margin: 20px 0; padding: 15px; background: #f9f9f9; border-radius: 15px; border: 1px solid #ddd;">
+                <div style="display:flex; justify-content: center; gap: 20px; align-items: center;">
+                    <div class="arch-input-group">
+                        <span style="font-size:12px; display:block; margin-bottom:5px; color:#777;">Ширина</span>
+                        <input type="number" id="arch-w" min="1" max="6" value="3" style="width:50px; padding:10px; border-radius:10px; border:2px solid #6c5ce7; text-align:center; font-size:18px; font-weight:bold;">
+                    </div>
+                    <div class="arch-input-group">
+                        <span style="font-size:12px; display:block; margin-bottom:5px; color:#777;">Высота</span>
+                        <input type="number" id="arch-h" min="1" max="6" value="3" style="width:50px; padding:10px; border-radius:10px; border:2px solid #6c5ce7; text-align:center; font-size:18px; font-weight:bold;">
+                    </div>
+                </div>
             </div>
+
+            <div id="modal-buttons"></div>
         </div>
     </div>
 
