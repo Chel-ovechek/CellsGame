@@ -249,18 +249,34 @@ function refreshUI() {
 window.rollDice = async () => {
     if (currentGameState === 'finished') return;
     if (currentTurn !== myRole) return showToast("Ход противника!");
+    
     const snap = await get(ref(db, `rooms/${currentRoom}/pendingDice`));
     if ((snap.exists() && snap.val().player === myRole) || activeRectElement) return showToast("Уже брошено!");
+    
     const d1 = Math.floor(Math.random() * 6) + 1, d2 = Math.floor(Math.random() * 6) + 1;
+    
+    // Проверка: можно ли поставить фигуру
     if (!canFitAnywhere(d1, d2)) {
-        if (myEnergy >= 2) {
+        // Если режим ЭНЕРГИЯ и у игрока хватает на переброс (2 и более)
+        if (currentMode === 'energy' && myEnergy >= 2) {
             showToast("Мест нет! Воспользуйтесь способностью.");
-            update(ref(db, `rooms/${currentRoom}`), { lastDice: `${d1}x${d2}`, pendingDice: { w: d1, h: d2, player: myRole } });
+            update(ref(db, `rooms/${currentRoom}`), { 
+                lastDice: `${d1}x${d2}`, 
+                pendingDice: { w: d1, h: d2, player: myRole } 
+            });
         } else {
-            update(ref(db, `rooms/${currentRoom}`), { gameState: "finished", lastDice: `${d1}x${d2}` });
+            // В обычном режиме или если нет энергии — ГЕЙМ ОВЕР
+            update(ref(db, `rooms/${currentRoom}`), { 
+                gameState: "finished", 
+                lastDice: `${d1}x${d2}` 
+            });
         }
     } else {
-        update(ref(db, `rooms/${currentRoom}`), { lastDice: `${d1}x${d2}`, pendingDice: { w: d1, h: d2, player: myRole } });
+        // Место есть, просто бросаем
+        update(ref(db, `rooms/${currentRoom}`), { 
+            lastDice: `${d1}x${d2}`, 
+            pendingDice: { w: d1, h: d2, player: myRole } 
+        });
     }
 };
 
@@ -314,10 +330,44 @@ window.useAbility = async (type) => {
             lastDice: `${d1}x${d2}`
         });
         showToast("Переброшено!");
+
+        if (!canFitAnywhere(d1, d2)) {
+        // Если режим ЭНЕРГИЯ и у игрока хватает на переброс (2 и более)
+            if (myEnergy >= 2) {
+                showToast("Мест нет! Воспользуйтесь способностью.");
+                update(ref(db, `rooms/${currentRoom}`), { 
+                    lastDice: `${d1}x${d2}`, 
+                    pendingDice: { w: d1, h: d2, player: myRole } 
+                });
+            } else {
+                // если нет энергии — ГЕЙМ ОВЕР
+                update(ref(db, `rooms/${currentRoom}`), { 
+                    gameState: "finished", 
+                    lastDice: `${d1}x${d2}` 
+                });
+            }
+        }
     } else if (type === 'destroy' && myEnergy >= 4) {
         targetingMode = !targetingMode;
         showToast(targetingMode ? "Выберите фигуру врага" : "Отмена");
         refreshUI();
+
+        if (!canFitAnywhere(d1, d2)) {
+        // Если режим ЭНЕРГИЯ и у игрока хватает на переброс (2 и более)
+            if (myEnergy >= 2) {
+                showToast("Мест нет! Воспользуйтесь способностью.");
+                update(ref(db, `rooms/${currentRoom}`), { 
+                    lastDice: `${d1}x${d2}`, 
+                    pendingDice: { w: d1, h: d2, player: myRole } 
+                });
+            } else {
+                // если нет энергии — ГЕЙМ ОВЕР
+                update(ref(db, `rooms/${currentRoom}`), { 
+                    gameState: "finished", 
+                    lastDice: `${d1}x${d2}` 
+                });
+            }
+        }
     } else if (type === 'max' && myEnergy >= 6) {
         const res = await showModal("Архитектор", "Создайте фигуру (1-6):", [{text:"Создать", value:"create", class:"btn-main"}, {text:"Отмена", value:null, class:"btn-sub"}], true);
         if (!res) return;
