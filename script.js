@@ -14,8 +14,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// Состояние
-let myRole = null; 
+let myRole = null;
 let currentRoom = "";
 let currentMapType = "square";
 let currentMode = "classic";
@@ -37,7 +36,6 @@ const turnDisplay = document.getElementById('turn-display');
 const lobbyScreen = document.getElementById('lobby-screen');
 const gameInterface = document.getElementById('game-interface');
 
-// СИСТЕМНЫЕ
 function showToast(text) {
     const container = document.getElementById('toast-container');
     const t = document.createElement('div');
@@ -72,7 +70,7 @@ function showModal(title, message, buttons = [], isArchitect = false) {
                         h: parseInt(document.getElementById('arch-h').value)
                     };
                 }
-                ov.style.display='none'; res(result); 
+                ov.style.display='none'; res(result);
             };
             btnContainer.appendChild(btn);
         });
@@ -82,7 +80,6 @@ function showModal(title, message, buttons = [], isArchitect = false) {
 }
 window.closeModal = () => { document.getElementById('custom-modal-overlay').style.display = 'none'; if(modalResolve) modalResolve(null); };
 
-// ЛОББИ
 async function checkExistingSession() {
     const savedRoom = localStorage.getItem('cellsGame_room');
     const savedRole = localStorage.getItem('cellsGame_role');
@@ -95,7 +92,7 @@ async function checkExistingSession() {
             document.getElementById('creator-settings').style.display = 'block';
         } else if (savedRole) {
             const snap = await get(ref(db, `rooms/${savedRoom}`));
-            if (snap.exists()) { currentRoom = savedRoom; myRole = savedRole; startGame(); } 
+            if (snap.exists()) { currentRoom = savedRoom; myRole = savedRole; startGame(); }
             else { localStorage.clear(); }
         }
     }
@@ -169,15 +166,14 @@ function refreshUI() {
     currentMapType = data.mapType || 'square';
     currentMode = data.gameMode || 'classic';
     const figures = data.figures || {};
-    
+
     const totalArea = data.totalArea ? (data.totalArea[myRole] || 0) : 0;
     const spentEnergy = data.spentEnergy ? (data.spentEnergy[myRole] || 0) : 0;
     myEnergy = Math.max(0, Math.floor(totalArea / 10) - spentEnergy);
 
     mapMask = generateMapMask(currentMapType);
     occupiedGrid = Array(20).fill().map(() => Array(20).fill(null));
-    
-    // Очистка только стационарных объектов
+
     gridElement.querySelectorAll('.cell').forEach(c => c.remove());
     gridElement.querySelectorAll('.rectangle.fixed').forEach(r => r.remove());
 
@@ -230,9 +226,12 @@ function refreshUI() {
         document.getElementById('ability-bar').style.display = 'none';
     }
 
-    if (data.pendingDice && data.pendingDice.player === myRole && !activeRectElement) {
-        currentDice = { w: data.pendingDice.w, h: data.pendingDice.h };
-        createDraggable(currentDice.w, currentDice.h);
+    // ИСПРАВЛЕННАЯ ПРОВЕРКА КУБИКОВ: Проверяем размеры, чтобы пересоздать после reroll
+    if (data.pendingDice && data.pendingDice.player === myRole) {
+        if (!activeRectElement || currentDice.w !== data.pendingDice.w || currentDice.h !== data.pendingDice.h) {
+            currentDice = { w: data.pendingDice.w, h: data.pendingDice.h };
+            createDraggable(currentDice.w, currentDice.h);
+        }
     }
 
     if (currentGameState === 'finished' && !gameEndedAlertShown) {
@@ -300,12 +299,20 @@ window.useAbility = async (type) => {
     if (type === 'reroll' && myEnergy >= 2) {
         const d1 = Math.floor(Math.random() * 6) + 1;
         const d2 = Math.floor(Math.random() * 6) + 1;
+        
+        // Очищаем превью перед перебросом
+        if(activeRectElement) { 
+            activeRectElement.remove(); 
+            activeRectElement = null; 
+        }
+        document.getElementById('preview-zone').innerHTML = '';
+        confirmBtn.style.display = 'none';
+
         await update(roomRef, { 
             [`spentEnergy/${myRole}`]: spent + 2, 
             pendingDice: { w: d1, h: d2, player: myRole },
             lastDice: `${d1}x${d2}`
         });
-        if(activeRectElement) { activeRectElement.remove(); activeRectElement = null; confirmBtn.style.display = 'none'; }
         showToast("Переброшено!");
     } else if (type === 'destroy' && myEnergy >= 4) {
         targetingMode = !targetingMode;
@@ -317,7 +324,10 @@ window.useAbility = async (type) => {
         const {w, h} = res;
         if (w<1 || w>6 || h<1 || h>6) return showToast("Размер 1-6!");
         if (!canFitAnywhere(w, h)) return showModal("Места нет", `Фигура ${w}x${h} не влезет!`, [{text:"Ок", class:"btn-main"}]);
+        
         if(activeRectElement) { activeRectElement.remove(); activeRectElement = null; }
+        document.getElementById('preview-zone').innerHTML = '';
+
         currentDice = {w, h};
         await update(roomRef, { [`spentEnergy/${myRole}`]: spent + 6, pendingDice: {w, h, player: myRole}, lastDice: `${w}x${h}` });
         showToast("Фигура создана!");
@@ -340,9 +350,11 @@ function createDraggable(w, h) {
     activeRectElement.style.width = w * cs + 'px';
     activeRectElement.style.height = h * cs + 'px';
     activeRectElement.style.backgroundColor = myRole === 'red' ? '#e84393' : '#0984e3';
+    
     document.getElementById('preview-zone').innerHTML = '';
     document.getElementById('preview-zone').appendChild(activeRectElement);
     confirmBtn.style.display = 'block';
+    
     let isDragging = false, isOnGrid = false;
     activeRectElement.onpointerdown = (e) => { isDragging = true; activeRectElement.setPointerCapture(e.pointerId); };
     activeRectElement.onpointermove = (e) => {
