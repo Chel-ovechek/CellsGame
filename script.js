@@ -344,6 +344,7 @@ window.confirmMove = async () => {
     const cs = gridElement.clientWidth / 20;
     const x = Math.round(parseInt(activeRectElement.style.left) / cs), y = Math.round(parseInt(activeRectElement.style.top) / cs);
     if (!canPlace(x, y, currentDice.w, currentDice.h, myRole)) return showToast("Тут нельзя!");
+    targetingMode = false;
     const areaNow = lastData.totalArea ? (lastData.totalArea[myRole] || 0) : 0;
     const updates = {
         [`figures/fig_${Date.now()}`]: { x, y, width: currentDice.w, height: currentDice.h, color: myRole },
