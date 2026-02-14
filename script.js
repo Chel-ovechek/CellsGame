@@ -276,6 +276,8 @@ function refreshUI() {
         document.getElementById('ab-max').disabled = (myEnergy < 6 || currentTurn !== myRole);
     } else {
         document.getElementById('ability-bar').style.display = 'none';
+        document.getElementById('red-energy').style.display = 'none';
+        document.getElementById('blue-energy').style.display = 'none';
     }
 
     if (data.pendingDice && data.pendingDice.player === myRole) {
