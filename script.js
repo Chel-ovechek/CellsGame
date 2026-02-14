@@ -280,10 +280,19 @@ function refreshUI() {
         document.getElementById('blue-energy').style.display = 'none';
     }
 
+    // Проверка кубиков: создаем, обновляем или УДАЛЯЕМ фигуру
     if (data.pendingDice && data.pendingDice.player === myRole) {
         if (!activeRectElement || currentDice.w !== data.pendingDice.w || currentDice.h !== data.pendingDice.h) {
             currentDice = { w: data.pendingDice.w, h: data.pendingDice.h };
             createDraggable(currentDice.w, currentDice.h);
+        }
+    } else {
+        // Если в базе нет брошенных кубиков для нас, а на экране (или в превью) что-то висит — удаляем
+        if (activeRectElement) {
+            activeRectElement.remove();
+            activeRectElement = null;
+            confirmBtn.style.display = 'none';
+            document.getElementById('preview-zone').innerHTML = '';
         }
     }
 
