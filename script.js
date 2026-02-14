@@ -243,18 +243,44 @@ function refreshUI() {
 
     const cs = gridElement.clientWidth / 20;
     let rScore = 0, bScore = 0;
+
+    // Сначала найдем ID самой последней поставленной фигуры
+    let latestId = null;
+    let maxTime = 0;
+    for (let id in figures) {
+        const timestamp = parseInt(id.split('_')[1]);
+        if (timestamp > maxTime) {
+            maxTime = timestamp;
+            latestId = id;
+        }
+    }
+
     for (let id in figures) {
         const f = figures[id];
         const rect = document.createElement('div');
-        rect.className = 'rectangle fixed' + (targetingMode && f.color !== myRole ? ' targetable' : '');
+        
+        // Добавляем класс last-move, если это последняя фигура
+        const isLast = (id === latestId);
+        rect.className = 'rectangle fixed' + 
+                        (targetingMode && f.color !== myRole ? ' targetable' : '') +
+                        (isLast ? ' last-move' : '');
+        
         rect.style.width = f.width * cs + 'px';
         rect.style.height = f.height * cs + 'px';
         rect.style.left = f.x * cs + 'px';
         rect.style.top = f.y * cs + 'px';
         rect.style.backgroundColor = f.color === 'red' ? '#e84393' : '#0984e3';
+        
         if(targetingMode && f.color !== myRole) rect.onclick = () => executeDestroy(id);
+        
         gridElement.appendChild(rect);
-        for (let i = f.y; i < f.y + f.height; i++) for (let j = f.x; j < f.x + f.width; j++) occupiedGrid[i][j] = f.color;
+        
+        // Заполнение сетки для логики
+        for (let i = f.y; i < f.y + f.height; i++) {
+            for (let j = f.x; j < f.x + f.width; j++) {
+                occupiedGrid[i][j] = f.color;
+            }
+        }
         f.color === 'red' ? rScore += f.width * f.height : bScore += f.width * f.height;
     }
 

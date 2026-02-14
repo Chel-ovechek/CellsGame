@@ -90,3 +90,42 @@ body {
     #preview-zone { width: 105px; height: 105px; }
     #confirmMoveButton { padding: 15px 18px; font-size: 14px; }
 }
+
+/* Последняя поставленная фигура */
+.rectangle.fixed.last-move {
+    outline: 2px solid rgb(214, 214, 214);
+    outline-offset: -2px;
+    box-shadow: inset 0 0 5px rgba(255, 255, 255, 0.5), 0 0 7px rgba(0,0,0,0.5);
+}
+
+/* Активная фигура (которую тащим или крутим) */
+.rectangle:not(.fixed) {
+    /* Темная рамка вместо белой, чтобы было видно на белом фоне */
+    outline: 2px solid rgba(0, 0, 0, 0.1);
+    outline-offset: -2px;
+    
+    /* Глубокая тень: создает эффект "парения" над полем */
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.5);
+    
+    /* Делаем цвет более насыщенным, чем у зафиксированных */
+    opacity: 0.7 !important;
+    
+    /* Анимация покачивания (увеличения) */
+    animation: activeLift 1.5s infinite ease-in-out;
+    z-index: 1001; /* Всегда выше всего */
+}
+
+@keyframes activeLift {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); } /* Слегка увеличивается, как будто подняли выше */
+    100% { transform: scale(1); }
+}
+
+/* Эффект "пульса" рамки, чтобы она мигала черным/прозрачным */
+.rectangle:not(.fixed)::after {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    border: 2px dashed white; /* Внутренний пунктир для контраста с черной рамкой */
+    pointer-events: none;
+}
