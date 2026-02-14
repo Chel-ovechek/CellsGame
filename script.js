@@ -14,6 +14,12 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
+// Уникальный ID игрока (паспорт браузера)
+if (!localStorage.getItem('cellsGame_myId')) {
+    localStorage.setItem('cellsGame_myId', 'p_' + Math.random().toString(36).substr(2, 9));
+}
+const myId = localStorage.getItem('cellsGame_myId');
+
 let myRole = null;
 let currentRoom = "";
 let currentMapType = "square";
@@ -38,6 +44,7 @@ const gameInterface = document.getElementById('game-interface');
 
 function showToast(text) {
     const container = document.getElementById('toast-container');
+    if (!container) return;
     const t = document.createElement('div');
     t.className = 'toast'; t.innerText = text;
     container.appendChild(t);
@@ -82,7 +89,6 @@ window.closeModal = () => { document.getElementById('custom-modal-overlay').styl
 
 async function checkExistingSession() {
     const savedRoom = localStorage.getItem('cellsGame_room');
-    const savedRole = localStorage.getItem('cellsGame_role');
     const configMode = localStorage.getItem('cellsGame_configMode');
     if (savedRoom) {
         if (configMode === 'true') {
@@ -90,10 +96,12 @@ async function checkExistingSession() {
             document.getElementById('room-input').value = currentRoom;
             document.getElementById('lobby-main-step').style.display = 'none';
             document.getElementById('creator-settings').style.display = 'block';
-        } else if (savedRole) {
+        } else {
             const snap = await get(ref(db, `rooms/${savedRoom}`));
-            if (snap.exists()) { currentRoom = savedRoom; myRole = savedRole; startGame(); }
-            else { localStorage.clear(); }
+            if (snap.exists()) { 
+                currentRoom = savedRoom; 
+                startGame(); 
+            } else { localStorage.clear(); }
         }
     }
 }
@@ -115,24 +123,49 @@ async function joinRoom(role, isCreator) {
     const name = document.getElementById('room-input').value.trim();
     if (!name) return showToast("Введите название!");
     currentRoom = name;
+
     const snap = await get(ref(db, `rooms/${currentRoom}`));
-    const data = snap.val();
+    const data = snap.val() || {};
+    let players = data.players || {};
 
     if (isCreator) {
-        myRole = role;
         currentMapType = document.getElementById('map-select').value;
         currentMode = document.getElementById('mode-select').value;
-        await set(ref(db, `rooms/${currentRoom}`), {
-            gameState: 'playing', mapType: currentMapType, gameMode: currentMode, turn: 'red', players: { [role]: true }, energy: {red: 0, blue: 0}, totalArea: {red: 0, blue: 0}, spentEnergy: {red: 0, blue: 0}
+        
+        const otherRole = (role === 'red' ? 'blue' : 'red');
+        let newPlayers = {};
+
+        // Находим, кто сейчас в комнате (кроме нас)
+        let guestId = null;
+        if (players.red && players.red !== myId) guestId = players.red;
+        if (players.blue && players.blue !== myId) guestId = players.blue;
+
+        // Себя ставим на выбранную роль
+        newPlayers[role] = myId;
+        // Если есть гость, ставим его на свободную роль
+        if (guestId) newPlayers[otherRole] = guestId;
+
+        await update(ref(db, `rooms/${currentRoom}`), {
+            gameState: 'playing', 
+            mapType: currentMapType, 
+            gameMode: currentMode, 
+            turn: 'red', 
+            players: newPlayers, 
+            totalArea: {red: 0, blue: 0}, 
+            spentEnergy: {red: 0, blue: 0},
+            pendingDice: null
         });
     } else {
+        // Логика обычного входа
         if (!snap.exists()) return showToast("Комната не найдена!");
-        const players = data.players || {};
-        if (!players.red) myRole = 'red'; else if (!players.blue) myRole = 'blue'; else return showToast("Комната полна!");
-        await update(ref(db, `rooms/${currentRoom}/players`), { [myRole]: true });
+        if (players.red === myId) { /* уже зашел */ }
+        else if (players.blue === myId) { /* уже зашел */ }
+        else if (!players.red) await update(ref(db, `rooms/${currentRoom}/players`), { red: myId });
+        else if (!players.blue) await update(ref(db, `rooms/${currentRoom}/players`), { blue: myId });
+        else return showToast("Комната полна!");
     }
+
     localStorage.setItem('cellsGame_room', currentRoom);
-    localStorage.setItem('cellsGame_role', myRole);
     localStorage.removeItem('cellsGame_configMode');
     startGame();
 }
@@ -141,7 +174,6 @@ function startGame() {
     lobbyScreen.style.display = 'none';
     gameInterface.style.display = 'flex';
     document.getElementById('display-room-name').innerText = currentRoom;
-    document.getElementById('my-role-display').innerText = `Вы: ${myRole === 'red' ? 'КРАСНЫЙ' : 'СИНИЙ'}`;
     initRoomListener();
 }
 
@@ -151,6 +183,26 @@ function initRoomListener() {
         const data = snapshot.val();
         if (!data) return;
         lastData = data;
+        const players = data.players || {};
+
+        // 1. Пытаемся найти себя в списке
+        if (players.red === myId) myRole = 'red';
+        else if (players.blue === myId) myRole = 'blue';
+        else {
+            // 2. Если нас нет в списке (сброс настроек), занимаем свободное место
+            if (!players.red) {
+                myRole = 'red';
+                update(ref(db, `rooms/${currentRoom}/players`), { red: myId });
+            } else if (!players.blue) {
+                myRole = 'blue';
+                update(ref(db, `rooms/${currentRoom}/players`), { blue: myId });
+            }
+        }
+
+        if (myRole) {
+            document.getElementById('my-role-display').innerText = `Вы: ${myRole === 'red' ? 'КРАСНЫЙ' : 'СИНИЙ'}`;
+            localStorage.setItem('cellsGame_role', myRole);
+        }
         refreshUI();
     });
 }
@@ -226,7 +278,6 @@ function refreshUI() {
         document.getElementById('ability-bar').style.display = 'none';
     }
 
-    // ИСПРАВЛЕННАЯ ПРОВЕРКА КУБИКОВ: Проверяем размеры, чтобы пересоздать после reroll
     if (data.pendingDice && data.pendingDice.player === myRole) {
         if (!activeRectElement || currentDice.w !== data.pendingDice.w || currentDice.h !== data.pendingDice.h) {
             currentDice = { w: data.pendingDice.w, h: data.pendingDice.h };
@@ -235,6 +286,7 @@ function refreshUI() {
     }
 
     if (currentGameState === 'finished' && !gameEndedAlertShown) {
+        if(activeRectElement) { activeRectElement.remove(); activeRectElement = null; } // Убираем фигуру с экрана
         gameEndedAlertShown = true;
         const winner = rScore > bScore ? 'КРАСНЫЕ' : 'СИНИЕ';
         showModal("ИГРА ОКОНЧЕНА", `Выпало: ${data.lastDice}.\nМест нет!\nПобедили ${winner}\nСчет ${rScore}:${bScore}`, [
@@ -255,9 +307,7 @@ window.rollDice = async () => {
     
     const d1 = Math.floor(Math.random() * 6) + 1, d2 = Math.floor(Math.random() * 6) + 1;
     
-    // Проверка: можно ли поставить фигуру
     if (!canFitAnywhere(d1, d2)) {
-        // Если режим ЭНЕРГИЯ и у игрока хватает на переброс (2 и более)
         if (currentMode === 'energy' && myEnergy >= 2) {
             showToast("Мест нет! Воспользуйтесь способностью.");
             update(ref(db, `rooms/${currentRoom}`), { 
@@ -265,14 +315,12 @@ window.rollDice = async () => {
                 pendingDice: { w: d1, h: d2, player: myRole } 
             });
         } else {
-            // В обычном режиме или если нет энергии — ГЕЙМ ОВЕР
             update(ref(db, `rooms/${currentRoom}`), { 
                 gameState: "finished", 
                 lastDice: `${d1}x${d2}` 
             });
         }
     } else {
-        // Место есть, просто бросаем
         update(ref(db, `rooms/${currentRoom}`), { 
             lastDice: `${d1}x${d2}`, 
             pendingDice: { w: d1, h: d2, player: myRole } 
@@ -316,58 +364,36 @@ window.useAbility = async (type) => {
         const d1 = Math.floor(Math.random() * 6) + 1;
         const d2 = Math.floor(Math.random() * 6) + 1;
         
-        // Очищаем превью перед перебросом
-        if(activeRectElement) { 
-            activeRectElement.remove(); 
-            activeRectElement = null; 
-        }
+        // Очищаем старое превью
+        if(activeRectElement) { activeRectElement.remove(); activeRectElement = null; }
         document.getElementById('preview-zone').innerHTML = '';
         confirmBtn.style.display = 'none';
 
+        const newSpent = spent + 2;
+        const energyAfter = Math.max(0, Math.floor((lastData.totalArea[myRole] || 0) / 10) - newSpent);
+
         await update(roomRef, { 
-            [`spentEnergy/${myRole}`]: spent + 2, 
+            [`spentEnergy/${myRole}`]: newSpent, 
             pendingDice: { w: d1, h: d2, player: myRole },
             lastDice: `${d1}x${d2}`
         });
+
         showToast("Переброшено!");
 
+        // Проверка: влезает ли новая фигура?
         if (!canFitAnywhere(d1, d2)) {
-        // Если режим ЭНЕРГИЯ и у игрока хватает на переброс (2 и более)
-            if (myEnergy >= 2) {
-                showToast("Мест нет! Воспользуйтесь способностью.");
-                update(ref(db, `rooms/${currentRoom}`), { 
-                    lastDice: `${d1}x${d2}`, 
-                    pendingDice: { w: d1, h: d2, player: myRole } 
-                });
+            if (energyAfter < 2) {
+                // Если даже после переброса не лезет и энергии больше нет — КОНЕЦ
+                await update(roomRef, { gameState: "finished" });
             } else {
-                // если нет энергии — ГЕЙМ ОВЕР
-                update(ref(db, `rooms/${currentRoom}`), { 
-                    gameState: "finished", 
-                    lastDice: `${d1}x${d2}` 
-                });
+                showToast("Все еще не лезет! Нужно перебросить еще раз.");
             }
         }
     } else if (type === 'destroy' && myEnergy >= 4) {
         targetingMode = !targetingMode;
         showToast(targetingMode ? "Выберите фигуру врага" : "Отмена");
         refreshUI();
-
-        if (!canFitAnywhere(d1, d2)) {
-        // Если режим ЭНЕРГИЯ и у игрока хватает на переброс (2 и более)
-            if (myEnergy >= 2) {
-                showToast("Мест нет! Воспользуйтесь способностью.");
-                update(ref(db, `rooms/${currentRoom}`), { 
-                    lastDice: `${d1}x${d2}`, 
-                    pendingDice: { w: d1, h: d2, player: myRole } 
-                });
-            } else {
-                // если нет энергии — ГЕЙМ ОВЕР
-                update(ref(db, `rooms/${currentRoom}`), { 
-                    gameState: "finished", 
-                    lastDice: `${d1}x${d2}` 
-                });
-            }
-        }
+        // Больше здесь ничего не нужно. Проверка будет в executeDestroy.
     } else if (type === 'max' && myEnergy >= 6) {
         const res = await showModal("Архитектор", "Создайте фигуру (1-6):", [{text:"Создать", value:"create", class:"btn-main"}, {text:"Отмена", value:null, class:"btn-sub"}], true);
         if (!res) return;
@@ -387,9 +413,30 @@ window.useAbility = async (type) => {
 async function executeDestroy(id) {
     targetingMode = false;
     const spent = lastData.spentEnergy ? (lastData.spentEnergy[myRole] || 0) : 0;
+    const newSpent = spent + 4;
+    
+    // 1. Сначала удаляем фигуру и тратим энергию
     await remove(ref(db, `rooms/${currentRoom}/figures/${id}`));
-    await update(ref(db, `rooms/${currentRoom}/spentEnergy`), { [myRole]: spent + 4 });
+    await update(ref(db, `rooms/${currentRoom}/spentEnergy`), { [myRole]: newSpent });
+    
     showToast("Сжёг!");
+
+    // 2. Ждем микро-паузу, чтобы локальная сетка occupiedGrid успела обновиться из refreshUI
+    // Либо делаем проверку на основе данных из последнего снимка, но проще проверить через небольшую задержку
+    setTimeout(async () => {
+        if (lastData.pendingDice) {
+            const { w, h } = lastData.pendingDice;
+            const energyAfter = Math.max(0, Math.floor((lastData.totalArea[myRole] || 0) / 10) - newSpent);
+            
+            if (!canFitAnywhere(w, h)) {
+                if (energyAfter < 2) {
+                    await update(ref(db, `rooms/${currentRoom}`), { gameState: "finished" });
+                } else {
+                    showToast("Места все равно нет! Нужен переброс.");
+                }
+            }
+        }
+    }, 100);
 }
 
 function createDraggable(w, h) {
@@ -435,7 +482,15 @@ async function handleManualResetAction(type) {
         await update(ref(db, `rooms/${currentRoom}`), { figures: null, gameState: 'playing', turn: 'red', pendingDice: null, totalArea: {red:0, blue:0}, spentEnergy: {red:0, blue:0} });
         location.reload();
     } else if (type === "config") {
-        await update(ref(db, `rooms/${currentRoom}`), { figures: null, gameState: 'playing', turn: 'red', pendingDice: null, totalArea: {red:0, blue:0}, spentEnergy: {red:0, blue:0}, players: null });
+        // Убрали players: null, чтобы второй игрок не вылетал из базы
+        await update(ref(db, `rooms/${currentRoom}`), { 
+            figures: null, 
+            gameState: 'playing', 
+            turn: 'red', 
+            pendingDice: null, 
+            totalArea: {red:0, blue:0}, 
+            spentEnergy: {red:0, blue:0} 
+        });
         localStorage.setItem('cellsGame_configMode', 'true');
         location.reload();
     } else if (type === "exit") {
