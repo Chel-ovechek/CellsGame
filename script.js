@@ -1,6 +1,5 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-app.js";
-import { getDatabase, ref, set, onValue, update, get, remove } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-database.js";
-
+import { getDatabase, ref, set, onValue, update, get, remove, onDisconnect } from "https://www.gstatic.com/firebasejs/11.3.1/firebase-database.js";
 const firebaseConfig = {
     apiKey: "AIzaSyBoDZITlAQRzK6D7rxOAHUMMSzXk1htu94",
     authDomain: "cellsgame-f7561.firebaseapp.com",
@@ -35,6 +34,7 @@ let myEnergy = 0;
 let targetingMode = false;
 let modalResolve = null;
 let playerCount = 0;
+let lastProcessedRollTime = 0;
 
 const gridElement = document.getElementById('grid');
 const confirmBtn = document.getElementById('confirmMoveButton');
@@ -220,6 +220,17 @@ function initRoomListener() {
         lastData = data;
         const players = data.players || {};
 
+        // Если мы в игре, говорим базе: "Если я отключусь — удали мой ID из игроков"
+        if (myRole) {
+            const myPresenceRef = ref(db, `rooms/${currentRoom}/players/${myRole}`);
+            onDisconnect(myPresenceRef).remove();
+        }
+        // Проверка: не появился ли в базе новый бросок кубиков?
+        if (data.activeRoll && data.activeRoll.timestamp > lastProcessedRollTime) {
+            lastProcessedRollTime = data.activeRoll.timestamp;
+            runDiceAnimation(data.activeRoll.w, data.activeRoll.h, data.activeRoll.rollerId);
+        }
+
         // 1. Пытаемся найти себя в списке
         if (players.red === myId) myRole = 'red';
         else if (players.blue === myId) myRole = 'blue';
@@ -377,28 +388,82 @@ window.rollDice = async () => {
     const snap = await get(ref(db, `rooms/${currentRoom}/pendingDice`));
     if ((snap.exists() && snap.val().player === myRole) || activeRectElement) return showToast("Уже брошено!");
     
-    const d1 = Math.floor(Math.random() * 6) + 1, d2 = Math.floor(Math.random() * 6) + 1;
-    
-    if (!canFitAnywhere(d1, d2)) {
-        if (currentMode === 'energy' && myEnergy >= 2) {
-            showToast("Мест нет! Воспользуйтесь способностью.");
-            update(ref(db, `rooms/${currentRoom}`), { 
-                lastDice: `${d1}x${d2}`, 
-                pendingDice: { w: d1, h: d2, player: myRole } 
-            });
-        } else {
-            update(ref(db, `rooms/${currentRoom}`), { 
-                gameState: "finished", 
-                lastDice: `${d1}x${d2}` 
-            });
-        }
-    } else {
-        update(ref(db, `rooms/${currentRoom}`), { 
-            lastDice: `${d1}x${d2}`, 
-            pendingDice: { w: d1, h: d2, player: myRole } 
-        });
-    }
+    const d1 = Math.floor(Math.random() * 6) + 1;
+    const d2 = Math.floor(Math.random() * 6) + 1;
+
+    // Записываем бросок в базу, чтобы его увидели ВСЕ
+    await update(ref(db, `rooms/${currentRoom}`), {
+        activeRoll: {
+            w: d1,
+            h: d2,
+            rollerId: myId,
+            timestamp: Date.now()
+        },
+        lastDice: `${d1}x${d2}`
+    });
 };
+
+function runDiceAnimation(d1, d2, rollerId) {
+    const overlay = document.getElementById('dice-overlay');
+    const cube1 = document.getElementById('dice1');
+    const cube2 = document.getElementById('dice2');
+
+    overlay.style.display = 'flex';
+    cube1.classList.add('cube-rolling');
+    cube2.classList.add('cube-rolling');
+
+    setTimeout(() => {
+        cube1.classList.remove('cube-rolling');
+        cube2.classList.remove('cube-rolling');
+        applyFinalRotation(cube1, d1);
+        applyFinalRotation(cube2, d2);
+    }, 600);
+
+    setTimeout(async () => {
+        overlay.style.display = 'none';
+        cube1.style.transform = '';
+        cube2.style.transform = '';
+
+        // Только тот, кто КИНУЛ кубики, обновляет состояние игры в базе
+        if (myId === rollerId) {
+            const canFit = canFitAnywhere(d1, d2);
+            const roomRef = ref(db, `rooms/${currentRoom}`);
+            
+            if (!canFit) {
+                if (currentMode === 'energy' && myEnergy >= 2) {
+                    showToast("Мест нет! Воспользуйтесь способностью.");
+                    await update(roomRef, { pendingDice: { w: d1, h: d2, player: myRole }, activeRoll: null });
+                } else {
+                    await update(roomRef, { gameState: "finished", activeRoll: null });
+                }
+            } else {
+                await update(roomRef, { pendingDice: { w: d1, h: d2, player: myRole }, activeRoll: null });
+            }
+        }
+    }, 1800);
+}
+
+// Функция расчета финального поворота
+function applyFinalRotation(cube, value) {
+    // Базовые повороты для каждой грани
+    const rotations = {
+        1: { x: 0,   y: 0 },
+        2: { x: -90, y: 0 },
+        3: { x: 0,   y: -90 },
+        4: { x: 0,   y: 90 },
+        5: { x: 90,  y: 0 },
+        6: { x: 180, y: 0 }
+    };
+
+    const target = rotations[value];
+    
+    // Добавляем 3-4 полных оборота (1080-1440 градусов), 
+    // чтобы кубик "докручивался" до цели реалистично
+    const extraX = 1080; 
+    const extraY = 1080;
+
+    cube.style.transform = `rotateX(${target.x + extraX}deg) rotateY(${target.y + extraY}deg)`;
+}
 
 window.confirmMove = async () => {
     if (!activeRectElement || activeRectElement.parentElement !== gridElement) return showToast("Тяните на поле!");
@@ -567,8 +632,25 @@ async function handleManualResetAction(type) {
         localStorage.setItem('cellsGame_configMode', 'true');
         location.reload();
     } else if (type === "exit") {
-        await remove(ref(db, `rooms/${currentRoom}`));
-        localStorage.clear(); location.reload();
+        const roomRef = ref(db, `rooms/${currentRoom}`);
+        const snap = await get(roomRef);
+        
+        if (snap.exists()) {
+            let players = snap.val().players || {};
+            // Удаляем только себя из списка игроков
+            if (players.red === myId) delete players.red;
+            if (players.blue === myId) delete players.blue;
+
+            // Если в комнате больше никого нет — удаляем комнату
+            if (Object.keys(players).length === 0) {
+                await remove(roomRef);
+            } else {
+                // Если кто-то остался — просто обновляем список игроков в базе
+                await set(ref(db, `rooms/${currentRoom}/players`), players);
+            }
+        }
+        localStorage.clear(); 
+        location.reload();
     }
 }
 
@@ -637,6 +719,8 @@ function initGlobalRoomList() {
         allRooms.forEach(([roomName, data]) => {
             const players = data.players || {};
             const pCount = Object.keys(players).length;
+
+            if (pCount === 0) return; 
             
             // Перевод значений
             const mapName = translateMap[data.mapType] || data.mapType || 'Стандарт';
