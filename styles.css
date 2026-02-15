@@ -129,3 +129,81 @@ body {
     border: 2px dashed white; /* Внутренний пунктир для контраста с черной рамкой */
     pointer-events: none;
 }
+/* Списки комнат - Контейнер и Скролл */
+#room-list-container {
+    margin-top: 20px;
+    border-top: 1px solid #eee;
+    padding-top: 15px;
+}
+
+#room-list {
+    max-height: 220px; /* Ограничение высоты, чтобы лобби не растягивалось */
+    overflow-y: auto;
+    padding-right: 5px;
+    -webkit-overflow-scrolling: touch; /* Плавный скролл на смартфонах */
+}
+
+/* Красивый скроллбар */
+#room-list::-webkit-scrollbar { width: 5px; }
+#room-list::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
+#room-list::-webkit-scrollbar-thumb { background: #ccc; border-radius: 10px; }
+#room-list::-webkit-scrollbar-thumb:hover { background: var(--primary); }
+
+.room-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    background: #f8f9fa;
+    border-radius: 14px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 2px solid transparent;
+}
+
+.room-item:hover {
+    background: #fff;
+    border-color: var(--primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+}
+
+.room-item-name { 
+    font-weight: 800; 
+    color: var(--dark); 
+    font-size: 15px; 
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* Если название слишком длинное */
+}
+
+.room-item-info { 
+    font-size: 11px; 
+    color: #7f8c8d; 
+    font-weight: 600; 
+    line-height: 1.4;
+    margin-top: 3px;
+}
+
+.room-item-info b {
+    color: #34495e; /* Выделяем значения карты и режима */
+}
+
+.room-item-status {
+    font-size: 10px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    text-transform: uppercase;
+    font-weight: 800;
+    color: white;
+    text-align: center;
+}
+
+.status-waiting { background: var(--success); }
+.status-full { background: #bdc3c7; }
+
+
+
+
+

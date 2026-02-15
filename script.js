@@ -42,6 +42,25 @@ const turnDisplay = document.getElementById('turn-display');
 const lobbyScreen = document.getElementById('lobby-screen');
 const gameInterface = document.getElementById('game-interface');
 
+const roomListContainer = document.getElementById('room-list-container');
+const roomListElement = document.getElementById('room-list');
+const roomInput = document.getElementById('room-input');
+
+// Словари для перевода на русский
+const translateMap = {
+    'square': 'Квадрат',
+    'octagon': 'Арена',
+    'donut': 'Кольцо',
+    'cross': 'Крест',
+    'fortress': 'Крепость'
+};
+
+const translateMode = {
+    'classic': 'Классика',
+    'connected': 'Связность',
+    'energy': 'Энергия'
+};
+
 function showToast(text) {
     const container = document.getElementById('toast-container');
     if (!container) return;
@@ -107,9 +126,25 @@ async function checkExistingSession() {
 }
 checkExistingSession();
 
-document.getElementById('btn-create-room').onclick = () => {
-    const name = document.getElementById('room-input').value.trim();
+document.getElementById('btn-create-room').onclick = async () => {
+    const name = roomInput.value.trim();
     if (!name) return showToast("Введите название!");
+    
+    // Проверка на уникальность
+    const snap = await get(ref(db, `rooms/${name}`));
+    if (snap.exists()) {
+        const data = snap.val();
+        if (Object.keys(data.players || {}).length >= 2) {
+            return showToast("Комната уже занята и полна!");
+        }
+        return showModal("Комната существует", "Такая комната уже есть. Хотите войти в неё?", [
+            { text: "Войти", value: "join", class: "btn-main" },
+            { text: "Отмена", value: null, class: "btn-sub" }
+        ]).then(res => {
+            if (res === "join") joinRoom(null, false);
+        });
+    }
+
     currentRoom = name;
     document.getElementById('lobby-main-step').style.display = 'none';
     document.getElementById('creator-settings').style.display = 'block';
@@ -578,6 +613,68 @@ window.showRules = () => {
     };
     showModal("Правила", rules[document.getElementById('mode-select').value], [{text: "Ок", value: true, class: "btn-main"}]);
 };
+
+function initGlobalRoomList() {
+    onValue(ref(db, 'rooms'), (snapshot) => {
+        const roomsData = snapshot.val();
+        if (!roomsData) {
+            roomListContainer.style.display = 'none';
+            return;
+        }
+
+        roomListContainer.style.display = 'block';
+        roomListElement.innerHTML = '';
+
+        const allRooms = Object.entries(roomsData);
+        const searchFilter = roomInput.value.trim().toLowerCase();
+
+        allRooms.sort(([nameA], [nameB]) => {
+            if (nameA.toLowerCase() === searchFilter) return -1;
+            if (nameB.toLowerCase() === searchFilter) return 1;
+            return 0;
+        });
+
+        allRooms.forEach(([roomName, data]) => {
+            const players = data.players || {};
+            const pCount = Object.keys(players).length;
+            
+            // Перевод значений
+            const mapName = translateMap[data.mapType] || data.mapType || 'Стандарт';
+            const modeName = translateMode[data.gameMode] || data.gameMode || 'Классика';
+            
+            const item = document.createElement('div');
+            item.className = 'room-item';
+            item.onclick = () => {
+                roomInput.value = roomName;
+                joinRoom(null, false);
+            };
+
+            const statusClass = pCount < 2 ? 'status-waiting' : 'status-full';
+            const statusText = pCount < 2 ? 'Свободно' : 'Мест нет';
+
+            item.innerHTML = `
+                <div style="flex: 1; min-width: 0;">
+                    <div class="room-item-name">${roomName}</div>
+                    <div class="room-item-info">
+                        Карта: <b>${mapName}</b><br>
+                        Режим: <b>${modeName}</b>
+                    </div>
+                </div>
+                <div style="text-align: right; margin-left: 10px;">
+                    <div class="room-item-status ${statusClass}">${pCount}/2</div>
+                    <div style="font-size: 9px; color: #95a5a6; margin-top: 4px; font-weight: bold; text-transform: uppercase;">${statusText}</div>
+                </div>
+            `;
+            roomListElement.appendChild(item);
+        });
+    });
+}
+
+// Вызываем функцию
+initGlobalRoomList();
+
+// Добавим обновление списка при вводе текста в инпут (чтобы сортировка работала на лету)
+roomInput.oninput = () => initGlobalRoomList();
 
 window.closeModal = closeModal;
 window.rollDice = rollDice;
