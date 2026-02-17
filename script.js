@@ -424,20 +424,37 @@ function runDiceAnimation(d1, d2, rollerId) {
         cube1.style.transform = '';
         cube2.style.transform = '';
 
-        // Только тот, кто КИНУЛ кубики, обновляет состояние игры в базе
+        // Только тот, кто инициировал бросок/переброс, обновляет базу в конце
         if (myId === rollerId) {
-            const canFit = canFitAnywhere(d1, d2);
             const roomRef = ref(db, `rooms/${currentRoom}`);
+            const canFit = canFitAnywhere(d1, d2);
+            
+            // Важно: myEnergy здесь уже обновится через refreshUI, 
+            // так как spentEnergy мы записали в базу ДО начала анимации.
             
             if (!canFit) {
+                // Если места нет и это режим энергии
                 if (currentMode === 'energy' && myEnergy >= 2) {
-                    showToast("Мест нет! Воспользуйтесь способностью.");
-                    await update(roomRef, { pendingDice: { w: d1, h: d2, player: myRole }, activeRoll: null });
+                    showToast("Мест нет! Используй энергию.");
+                    // Ставим pendingDice, чтобы кнопка переброса стала активной снова
+                    await update(roomRef, { 
+                        pendingDice: { w: d1, h: d2, player: myRole }, 
+                        activeRoll: null 
+                    });
                 } else {
-                    await update(roomRef, { gameState: "finished", activeRoll: null });
+                    // Если классика или нет энергии на новый переброс — ГЕЙМ ОВЕР
+                    await update(roomRef, { 
+                        gameState: "finished", 
+                        activeRoll: null,
+                        pendingDice: null // Убираем фигуру, если проиграли
+                    });
                 }
             } else {
-                await update(roomRef, { pendingDice: { w: d1, h: d2, player: myRole }, activeRoll: null });
+                // Место есть — просто фиксируем результат броска
+                await update(roomRef, { 
+                    pendingDice: { w: d1, h: d2, player: myRole }, 
+                    activeRoll: null 
+                });
             }
         }
     }, 1800);
@@ -502,31 +519,28 @@ window.useAbility = async (type) => {
         const d1 = Math.floor(Math.random() * 6) + 1;
         const d2 = Math.floor(Math.random() * 6) + 1;
         
-        // Очищаем старое превью
+        // Очищаем старое превью локально
         if(activeRectElement) { activeRectElement.remove(); activeRectElement = null; }
         document.getElementById('preview-zone').innerHTML = '';
         confirmBtn.style.display = 'none';
 
         const newSpent = spent + 2;
-        const energyAfter = Math.max(0, Math.floor((lastData.totalArea[myRole] || 0) / 10) - newSpent);
 
+        // Запускаем анимацию для всех через activeRoll
+        // и ОБЯЗАТЕЛЬНО зануляем pendingDice, чтобы старая фигура исчезла у обоих
         await update(roomRef, { 
             [`spentEnergy/${myRole}`]: newSpent, 
-            pendingDice: { w: d1, h: d2, player: myRole },
+            activeRoll: {
+                w: d1,
+                h: d2,
+                rollerId: myId,
+                timestamp: Date.now()
+            },
+            pendingDice: null, 
             lastDice: `${d1}x${d2}`
         });
 
-        showToast("Переброшено!");
-
-        // Проверка: влезает ли новая фигура?
-        if (!canFitAnywhere(d1, d2)) {
-            if (energyAfter < 2) {
-                // Если даже после переброса не лезет и энергии больше нет — КОНЕЦ
-                await update(roomRef, { gameState: "finished" });
-            } else {
-                showToast("Все еще не лезет! Нужно перебросить еще раз.");
-            }
-        }
+        showToast("Переброс...");
     } else if (type === 'destroy' && myEnergy >= 4) {
         targetingMode = !targetingMode;
         showToast(targetingMode ? "Выберите фигуру врага" : "Отмена");
@@ -570,7 +584,7 @@ async function executeDestroy(id) {
                 if (energyAfter < 2) {
                     await update(ref(db, `rooms/${currentRoom}`), { gameState: "finished" });
                 } else {
-                    showToast("Места все равно нет! Нужен переброс.");
+                    showToast("Места все равно нет! Используй энергию.");
                 }
             }
         }
