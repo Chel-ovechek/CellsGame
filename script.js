@@ -77,40 +77,46 @@ function showToast(text) {
 }
 
 window.selectPlayMode = (mode) => {
-    currentPlayMode = mode;
-    localStorage.setItem('cellsGame_playMode', mode);
-    
-    // Скрываем первый шаг (выбор типа игры)
-    document.getElementById('lobby-type-step').style.display = 'none';
-    
-    const settingGroups = document.querySelectorAll('.setting-group');
-    const colorLabel = settingGroups[2].querySelector('label'); 
-    const btnRed = document.getElementById('pick-red');
-    const btnBlue = document.getElementById('pick-blue');
-    const btnLocal = document.getElementById('btn-start-local');
+    try {
+        currentPlayMode = mode;
+        localStorage.setItem('cellsGame_playMode', mode);
+        
+        // Скрываем первый шаг
+        const typeStep = document.getElementById('lobby-type-step');
+        if (typeStep) typeStep.style.display = 'none';
+        
+        const settingGroups = document.querySelectorAll('.setting-group');
+        const colorLabel = settingGroups[2]?.querySelector('label'); 
+        const btnRed = document.getElementById('pick-red');
+        const btnBlue = document.getElementById('pick-blue');
+        const btnLocal = document.getElementById('btn-start-local');
 
-    if (mode === 'online') {
-        localStorage.removeItem('cellsGame_configMode'); // Сбрасываем режим настроек при поиске комнат
-        document.getElementById('lobby-main-step').style.display = 'block';
-        document.getElementById('creator-settings').style.display = 'none';
-        initGlobalRoomList();
-    } else {
-        // ОФЛАЙН (Local / CPU): Скрываем ввод комнаты, сразу открываем настройки
-        document.getElementById('lobby-main-step').style.display = 'none';
-        document.getElementById('creator-settings').style.display = 'block';
-
-        if (mode === 'local') {
-            colorLabel.style.display = 'none';
-            btnRed.style.display = 'none';
-            btnBlue.style.display = 'none';
-            btnLocal.style.display = 'block';
+        if (mode === 'online') {
+            document.getElementById('lobby-main-step').style.display = 'block';
+            document.getElementById('creator-settings').style.display = 'none';
+            initGlobalRoomList();
         } else {
-            // CPU
-            colorLabel.style.display = 'block';
-            btnRed.style.display = 'block';
-            btnBlue.style.display = 'block';
-            btnLocal.style.display = 'none';
+            document.getElementById('lobby-main-step').style.display = 'none';
+            document.getElementById('creator-settings').style.display = 'block';
+
+            if (mode === 'local') {
+                if (colorLabel) colorLabel.style.display = 'none';
+                if (btnRed) btnRed.style.display = 'none';
+                if (btnBlue) btnBlue.style.display = 'none';
+                if (btnLocal) btnLocal.style.display = 'block';
+            } else {
+                if (colorLabel) colorLabel.style.display = 'block';
+                if (btnRed) btnRed.style.display = 'block';
+                if (btnBlue) btnBlue.style.display = 'block';
+                if (btnLocal) btnLocal.style.display = 'none';
+            }
         }
+    } catch (e) {
+        console.error("Storage error:", e);
+        // Если localStorage недоступен, просто переключаем UI
+        document.getElementById('lobby-type-step').style.display = 'none';
+        if (mode === 'online') document.getElementById('lobby-main-step').style.display = 'block';
+        else document.getElementById('creator-settings').style.display = 'block';
     }
 };
 
