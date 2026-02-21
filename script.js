@@ -35,6 +35,9 @@ let targetingMode = false;
 let modalResolve = null;
 let playerCount = 0;
 let lastProcessedRollTime = 0;
+let currentPlayMode = 'online'; // 'online', 'local', 'cpu'
+let localData = null; // Для хранения состояния офлайн игры
+let isCpuThinking = false;
 
 const gridElement = document.getElementById('grid');
 const confirmBtn = document.getElementById('confirmMoveButton');
@@ -73,6 +76,195 @@ function showToast(text) {
     }, 2500);
 }
 
+window.selectPlayMode = (mode) => {
+    currentPlayMode = mode;
+    localStorage.setItem('cellsGame_playMode', mode);
+    
+    // Скрываем первый шаг (выбор типа игры)
+    document.getElementById('lobby-type-step').style.display = 'none';
+    
+    const settingGroups = document.querySelectorAll('.setting-group');
+    const colorLabel = settingGroups[2].querySelector('label'); 
+    const btnRed = document.getElementById('pick-red');
+    const btnBlue = document.getElementById('pick-blue');
+    const btnLocal = document.getElementById('btn-start-local');
+
+    if (mode === 'online') {
+        localStorage.removeItem('cellsGame_configMode'); // Сбрасываем режим настроек при поиске комнат
+        document.getElementById('lobby-main-step').style.display = 'block';
+        document.getElementById('creator-settings').style.display = 'none';
+        initGlobalRoomList();
+    } else {
+        // ОФЛАЙН (Local / CPU): Скрываем ввод комнаты, сразу открываем настройки
+        document.getElementById('lobby-main-step').style.display = 'none';
+        document.getElementById('creator-settings').style.display = 'block';
+
+        if (mode === 'local') {
+            colorLabel.style.display = 'none';
+            btnRed.style.display = 'none';
+            btnBlue.style.display = 'none';
+            btnLocal.style.display = 'block';
+        } else {
+            // CPU
+            colorLabel.style.display = 'block';
+            btnRed.style.display = 'block';
+            btnBlue.style.display = 'block';
+            btnLocal.style.display = 'none';
+        }
+    }
+};
+
+async function syncGameState(updates) {
+    if (currentPlayMode === 'online') {
+        await update(ref(db, `rooms/${currentRoom}`), updates);
+    } else {
+        if (!localData) {
+            localData = {
+                gameState: 'playing',
+                turn: 'red',
+                players: { red: myId, blue: currentPlayMode === 'cpu' ? 'bot' : 'p2' },
+                totalArea: { red: 0, blue: 0 },
+                spentEnergy: { red: 0, blue: 0 },
+                mapType: currentMapType,
+                gameMode: currentMode,
+                figures: {},
+                pendingDice: null,
+                lastDice: '?'
+            };
+            lastData = localData;
+        }
+        
+        for (let key in updates) {
+            const value = updates[key];
+            const path = key.split('/');
+            if (path.length === 1) {
+                if (value === null) delete localData[key];
+                else localData[key] = value;
+            } else {
+                if (!localData[path[0]]) localData[path[0]] = {};
+                if (value === null) delete localData[path[0]][path[1]];
+                else localData[path[0]][path[1]] = value;
+            }
+        }
+        
+        lastData = localData;
+        
+        if (currentPlayMode === 'local' && updates.turn) {
+            myRole = updates.turn;
+            document.getElementById('my-role-display').innerText = `Вы: ${myRole === 'red' ? 'КРАСНЫЙ' : 'СИНИЙ'}`;
+        }
+
+        refreshUI();
+
+        // ИСПРАВЛЕННЫЙ ТРИГГЕР БОТА
+        if (currentPlayMode === 'cpu' && lastData.gameState !== 'finished' && !isCpuThinking) {
+            const botColor = (myRole === 'red' ? 'blue' : 'red'); // Определяем цвет бота
+            if (lastData.turn === botColor) {
+                cpuTurn(); 
+            }
+        }
+    }
+}
+
+async function cpuTurn() {
+    const botColor = (myRole === 'red' ? 'blue' : 'red');
+    if (isCpuThinking || lastData.turn !== botColor) return; 
+    isCpuThinking = true;
+
+    const botArea = lastData.totalArea?.[botColor] || 0;
+    const botSpent = lastData.spentEnergy?.[botColor] || 0;
+    let botEnergy = Math.max(0, Math.floor(botArea / 10) - botSpent);
+
+    // Агрессивное сжигание при лимите энергии
+    if (botEnergy >= 10 && currentMode === 'energy') {
+        const enemyFigures = Object.entries(lastData.figures || {}).filter(([id, f]) => f.color === myRole);
+        if (enemyFigures.length > 0) {
+            showToast("Бот: Сжигаю вашу территорию!");
+            enemyFigures.sort((a, b) => (b[1].width * b[1].height) - (a[1].width * a[1].height));
+            await syncGameState({ [`figures/${enemyFigures[0][0]}`]: null, [`spentEnergy/${botColor}`]: botSpent + 4 });
+            setTimeout(() => { isCpuThinking = false; cpuTurn(); }, 600);
+            return;
+        }
+    }
+
+    const d1 = Math.floor(Math.random() * 6) + 1;
+    const d2 = Math.floor(Math.random() * 6) + 1;
+    runDiceAnimation(d1, d2, 'bot');
+
+    setTimeout(async () => {
+        // Ищем все возможные ходы
+        let possibleMoves = [];
+        const rotations = [[d1, d2], [d2, d1]];
+        
+        // Сканируем поле
+        for (let [w, h] of rotations) {
+            for (let y = 0; y <= 20 - h; y++) {
+                for (let x = 0; x <= 20 - w; x++) {
+                    if (canPlace(x, y, w, h, botColor)) {
+                        let score = evaluateMove(x, y, w, h, botColor);
+                        possibleMoves.push({x, y, w, h, score});
+                    }
+                }
+            }
+        }
+
+        // Если ходы найдены, выбираем лучший
+        if (possibleMoves.length > 0) {
+            // Сортируем по убыванию очков
+            possibleMoves.sort((a, b) => b.score - a.score);
+            // Берем один из топ-3 лучших ходов (чтобы была небольшая случайность)
+            const bestMove = possibleMoves[Math.floor(Math.random() * Math.min(3, possibleMoves.length))];
+            executeCpuMove(bestMove.x, bestMove.y, bestMove.w, bestMove.h, botColor);
+        } else if (currentMode === 'energy') {
+            // Если места нет, используем способности (как раньше)
+            if (botEnergy >= 6) {
+                showToast("Бот: Архитектор");
+                const bestSize = findBestArchitectSize(botColor);
+                if (bestSize) {
+                    await syncGameState({ [`spentEnergy/${botColor}`]: botSpent + 6 });
+                    executeCpuMove(bestSize.x, bestSize.y, bestSize.w, bestSize.h, botColor);
+                    isCpuThinking = false;
+                    return;
+                }
+            }
+            if (botEnergy >= 4) {
+                const enemyFigures = Object.entries(lastData.figures || {}).filter(([id, f]) => f.color === myRole);
+                if (enemyFigures.length > 0) {
+                    showToast("Бот: Вынужденное сжигание");
+                    enemyFigures.sort((a, b) => (b[1].width * b[1].height) - (a[1].width * a[1].height));
+                    const targetId = enemyFigures[0][0];
+                    await syncGameState({ [`figures/${targetId}`]: null, [`spentEnergy/${botColor}`]: botSpent + 4 });
+                    setTimeout(() => {
+                        isCpuThinking = false;
+                        cpuTurn(); // Пробуем походить снова после удаления препятствия
+                    }, 200);
+                    return;
+                }
+            }
+            if (botEnergy >= 2) { 
+                showToast("Бот: Переброс");
+                await syncGameState({ [`spentEnergy/${botColor}`]: botSpent + 2 });
+                isCpuThinking = false; cpuTurn(); return;
+            }
+            await syncGameState({ gameState: 'finished', lastDice: `${d1}x${d2}`, pendingDice: null });
+        } else {
+            await syncGameState({ gameState: 'finished', lastDice: `${d1}x${d2}`, pendingDice: null });
+        }
+        isCpuThinking = false;
+    }, 2200);
+}
+
+async function executeCpuMove(x, y, w, h, color) {
+    const areaNow = lastData.totalArea?.[color] || 0;
+    const nextTurn = (color === 'red' ? 'blue' : 'red');
+    await syncGameState({
+        [`figures/bot_${Date.now()}`]: { x, y, width: w, height: h, color: color },
+        turn: nextTurn,
+        pendingDice: null,
+        [`totalArea/${color}`]: areaNow + (w * h)
+    });
+}
+
 function showModal(title, message, buttons = [], isArchitect = false) {
     return new Promise((res) => {
         modalResolve = res;
@@ -109,107 +301,202 @@ window.closeModal = () => { document.getElementById('custom-modal-overlay').styl
 async function checkExistingSession() {
     const savedRoom = localStorage.getItem('cellsGame_room');
     const configMode = localStorage.getItem('cellsGame_configMode');
+    const savedMode = localStorage.getItem('cellsGame_playMode');
+
+    // 1. Скрываем начальный выбор режима, если что-то уже сохранено
+    if (savedMode || savedRoom) {
+        document.getElementById('lobby-type-step').style.display = 'none';
+    } else {
+        return; // Если ничего нет, остаемся на выборе режима (Step 0)
+    }
+
+    // 2. Если это офлайн режим (Local / CPU)
+    if (savedMode && savedMode !== 'online') {
+        selectPlayMode(savedMode); 
+        return;
+    }
+
+    // 3. Если это Онлайн
     if (savedRoom) {
+        currentRoom = savedRoom;
+        currentPlayMode = 'online';
+
         if (configMode === 'true') {
-            currentRoom = savedRoom;
-            document.getElementById('room-input').value = currentRoom;
+            // МЫ В НАСТРОЙКАХ (Создатель)
             document.getElementById('lobby-main-step').style.display = 'none';
             document.getElementById('creator-settings').style.display = 'block';
+            
+            // Настраиваем видимость кнопок для онлайна
+            const settingGroups = document.querySelectorAll('.setting-group');
+            settingGroups[2].style.display = 'block'; // Блок "Ваша сторона"
+            document.getElementById('btn-start-local').style.display = 'none';
+            document.getElementById('pick-red').style.display = 'block';
+            document.getElementById('pick-blue').style.display = 'block';
         } else {
-            const snap = await get(ref(db, `rooms/${savedRoom}`));
+            // МЫ В ИГРЕ
+            const snap = await get(ref(db, `rooms/${currentRoom}`));
             if (snap.exists()) { 
-                currentRoom = savedRoom; 
                 startGame(); 
-            } else { localStorage.clear(); }
+            } else { 
+                localStorage.clear(); 
+                location.reload();
+            }
         }
+    } else if (savedMode === 'online') {
+        // Если выбрали онлайн, но комнату еще не ввели
+        selectPlayMode('online');
     }
 }
 checkExistingSession();
 
+// Кнопка СОЗДАТЬ
 document.getElementById('btn-create-room').onclick = async () => {
     const name = roomInput.value.trim();
-    if (!name) return showToast("Введите название!");
+    if (!name) return showToast("Введите название комнаты!");
     
-    // Проверка на уникальность
+    // Проверка на уникальность в Firebase
     const snap = await get(ref(db, `rooms/${name}`));
     if (snap.exists()) {
         const data = snap.val();
         if (Object.keys(data.players || {}).length >= 2) {
-            return showToast("Комната уже занята и полна!");
+            return showToast("Комната уже занята!");
         }
-        return showModal("Комната существует", "Такая комната уже есть. Хотите войти в неё?", [
+        const res = await showModal("Комната существует", "Такая комната уже есть. Войти в неё?", [
             { text: "Войти", value: "join", class: "btn-main" },
             { text: "Отмена", value: null, class: "btn-sub" }
-        ]).then(res => {
-            if (res === "join") joinRoom(null, false);
-        });
+        ]);
+        if (res === "join") {
+            currentRoom = name; // Фиксируем имя
+            joinRoom(null, false);
+        }
+        return;
     }
 
+    // Если комнаты нет — создаем новую и идем в настройки
     currentRoom = name;
+    localStorage.setItem('cellsGame_room', name);
+    localStorage.setItem('cellsGame_playMode', 'online');
+    localStorage.setItem('cellsGame_configMode', 'true');
+
     document.getElementById('lobby-main-step').style.display = 'none';
     document.getElementById('creator-settings').style.display = 'block';
+    
+    // Показываем кнопки выбора цвета
+    const colorSettings = document.querySelectorAll('.setting-group')[2];
+    colorSettings.style.display = 'block';
+    document.getElementById('btn-start-local').style.display = 'none';
+    document.getElementById('pick-red').style.display = 'block';
+    document.getElementById('pick-blue').style.display = 'block';
 };
 
+document.getElementById('btn-start-local').onclick = () => joinRoom('red', false);
 document.getElementById('pick-red').onclick = () => joinRoom('red', true);
 document.getElementById('pick-blue').onclick = () => joinRoom('blue', true);
-document.getElementById('btn-join-room').onclick = () => joinRoom(null, false);
+// Кнопка ВОЙТИ
+document.getElementById('btn-join-room').onclick = () => {
+    const name = roomInput.value.trim();
+    if (!name) return showToast("Введите название комнаты!");
+    currentRoom = name; // Фиксируем имя перед входом
+    joinRoom(null, false);
+};
 
 async function joinRoom(role, isCreator) {
-    const name = document.getElementById('room-input').value.trim();
-    if (!name) return showToast("Введите название!");
-    currentRoom = name;
+    // 1. Офлайн режимы
+    if (currentPlayMode === 'local') {
+        myRole = 'red'; 
+        localStorage.setItem('cellsGame_role', 'red');
+        startGame();
+        return;
+    }
+    if (currentPlayMode === 'cpu') {
+        myRole = role; 
+        localStorage.setItem('cellsGame_role', role); 
+        startGame();
+        return;
+    }
 
-    const snap = await get(ref(db, `rooms/${currentRoom}`));
+    // 2. Онлайн режим
+    // Если currentRoom почему-то пуст, пробуем взять из инпута
+    if (!currentRoom) currentRoom = roomInput.value.trim();
+    if (!currentRoom) return showToast("Комната не определена!");
+
+    const roomRef = ref(db, `rooms/${currentRoom}`);
+    const snap = await get(roomRef);
     const data = snap.val() || {};
     let players = data.players || {};
 
     if (isCreator) {
+        // Логика СОЗДАТЕЛЯ (выбор настроек)
         currentMapType = document.getElementById('map-select').value;
         currentMode = document.getElementById('mode-select').value;
-        
         const otherRole = (role === 'red' ? 'blue' : 'red');
+        
         let newPlayers = {};
-
-        // Находим, кто сейчас в комнате (кроме нас)
         let guestId = null;
         if (players.red && players.red !== myId) guestId = players.red;
         if (players.blue && players.blue !== myId) guestId = players.blue;
 
-        // Себя ставим на выбранную роль
         newPlayers[role] = myId;
-        // Если есть гость, ставим его на свободную роль
         if (guestId) newPlayers[otherRole] = guestId;
 
-        await update(ref(db, `rooms/${currentRoom}`), {
-            gameState: 'playing', 
-            mapType: currentMapType, 
-            gameMode: currentMode, 
-            turn: 'red', 
-            players: newPlayers, 
-            totalArea: {red: 0, blue: 0}, 
-            spentEnergy: {red: 0, blue: 0},
-            pendingDice: null
+        await syncGameState({
+            gameState: 'playing', mapType: currentMapType, gameMode: currentMode,
+            turn: 'red', players: newPlayers, totalArea: {red: 0, blue: 0}, spentEnergy: {red: 0, blue: 0},
+            lastDice: '?', pendingDice: null
         });
+        
+        myRole = role;
     } else {
-        // Логика обычного входа
+        // Логика ОБЫЧНОГО ВХОДА (по кнопке "Войти" или из списка)
         if (!snap.exists()) return showToast("Комната не найдена!");
-        if (players.red === myId) { /* уже зашел */ }
-        else if (players.blue === myId) { /* уже зашел */ }
-        else if (!players.red) await update(ref(db, `rooms/${currentRoom}/players`), { red: myId });
-        else if (!players.blue) await update(ref(db, `rooms/${currentRoom}/players`), { blue: myId });
+        
+        if (players.red === myId) myRole = 'red';
+        else if (players.blue === myId) myRole = 'blue';
+        else if (!players.red) { 
+            myRole = 'red'; 
+            await update(ref(db, `rooms/${currentRoom}/players`), { red: myId }); 
+        }
+        else if (!players.blue) { 
+            myRole = 'blue'; 
+            await update(ref(db, `rooms/${currentRoom}/players`), { blue: myId }); 
+        }
         else return showToast("Комната полна!");
     }
 
+    // Сохраняем и запускаем
     localStorage.setItem('cellsGame_room', currentRoom);
-    localStorage.removeItem('cellsGame_configMode');
+    localStorage.setItem('cellsGame_playMode', 'online');
+    localStorage.removeItem('cellsGame_configMode'); // Выходим из режима настроек
     startGame();
 }
 
 function startGame() {
     lobbyScreen.style.display = 'none';
     gameInterface.style.display = 'flex';
-    document.getElementById('display-room-name').innerText = currentRoom;
-    initRoomListener();
+    
+    if (currentPlayMode === 'online') {
+        document.getElementById('display-room-name').innerText = currentRoom;
+        initRoomListener();
+    } else {
+        const title = currentPlayMode === 'cpu' ? "Против Бота" : "Локальная игра";
+        document.getElementById('display-room-name').innerText = title;
+        
+        // Читаем выбранную роль
+        myRole = localStorage.getItem('cellsGame_role') || 'red';
+        document.getElementById('my-role-display').innerText = `Вы: ${myRole === 'red' ? 'КРАСНЫЙ' : 'СИНИЙ'}`;
+        
+        currentMapType = document.getElementById('map-select').value;
+        currentMode = document.getElementById('mode-select').value;
+        
+        // Инициализируем локальные данные
+        localData = null; // Сбрасываем старые данные
+        syncGameState({}); 
+
+        // Если против CPU и игрок выбрал СИНИЙ — бот (Красный) делает первый ход
+        if (currentPlayMode === 'cpu' && myRole === 'blue') {
+            setTimeout(cpuTurn, 1000);
+        }
+    }
 }
 
 let lastData = null;
@@ -253,9 +540,58 @@ function initRoomListener() {
     });
 }
 
+function runDiceAnimation(d1, d2, rollerId) {
+    const overlay = document.getElementById('dice-overlay');
+    const cube1 = document.getElementById('dice1');
+    const cube2 = document.getElementById('dice2');
+
+    overlay.style.display = 'flex';
+    cube1.classList.add('cube-rolling');
+    cube2.classList.add('cube-rolling');
+
+    setTimeout(() => {
+        cube1.classList.remove('cube-rolling');
+        cube2.classList.remove('cube-rolling');
+        applyFinalRotation(cube1, d1); // Тот самый фикс для 6 и 9
+        applyFinalRotation(cube2, d2);
+    }, 600);
+
+    setTimeout(async () => {
+        overlay.style.display = 'none';
+        cube1.style.transform = '';
+        cube2.style.transform = '';
+
+        // Завершаем логику только для того, кто бросал (или в офлайне)
+        if (currentPlayMode !== 'online' || myId === rollerId) {
+            if (rollerId === 'bot') {
+                await syncGameState({ activeRoll: null, lastDice: `${d1}x${d2}` });
+                return; 
+            }
+
+            const canFit = canFitAnywhere(d1, d2);
+            const updates = { lastDice: `${d1}x${d2}`, activeRoll: null };
+            
+            if (!canFit) {
+                // Если после переброса места всё равно нет
+                if (currentMode === 'energy' && myEnergy >= 2) {
+                    showToast("Мест нет! Нужен еще переброс.");
+                    updates.pendingDice = { w: d1, h: d2, player: myRole };
+                } else {
+                    updates.gameState = "finished";
+                    updates.pendingDice = null;
+                }
+            } else {
+                // Место есть — выводим новую фигуру
+                updates.pendingDice = { w: d1, h: d2, player: myRole };
+            }
+            await syncGameState(updates);
+        }
+    }, 1800);
+}
+
 function refreshUI() {
     const data = lastData;
-    const pCount = Object.keys(data.players || {}).length;
+    const pCount = data && data.players ? Object.keys(data.players).length : 0;
     if (pCount > playerCount && pCount === 2) showToast("Второй игрок зашел!");
     playerCount = pCount;
 
@@ -385,101 +721,48 @@ window.rollDice = async () => {
     if (currentGameState === 'finished') return;
     if (currentTurn !== myRole) return showToast("Ход противника!");
     
-    const snap = await get(ref(db, `rooms/${currentRoom}/pendingDice`));
-    if ((snap.exists() && snap.val().player === myRole) || activeRectElement) return showToast("Уже брошено!");
+    // Проверка: брошено ли уже? (Учитываем офлайн)
+    if (activeRectElement) return showToast("Уже брошено!");
+    if (currentPlayMode === 'online') {
+        const snap = await get(ref(db, `rooms/${currentRoom}/pendingDice`));
+        if (snap.exists() && snap.val().player === myRole) return showToast("Уже брошено!");
+    } else {
+        if (lastData && lastData.pendingDice && lastData.pendingDice.player === myRole) return showToast("Уже брошено!");
+    }
     
     const d1 = Math.floor(Math.random() * 6) + 1;
     const d2 = Math.floor(Math.random() * 6) + 1;
 
-    // Записываем бросок в базу, чтобы его увидели ВСЕ
-    await update(ref(db, `rooms/${currentRoom}`), {
-        activeRoll: {
-            w: d1,
-            h: d2,
-            rollerId: myId,
-            timestamp: Date.now()
-        },
-        lastDice: `${d1}x${d2}`
-    });
+    if (currentPlayMode === 'online') {
+        await syncGameState({
+            activeRoll: { w: d1, h: d2, rollerId: myId, timestamp: Date.now() },
+            lastDice: `${d1}x${d2}`
+        });
+    } else {
+        // В офлайне запускаем анимацию ВРУЧНУЮ, так как слушателя базы нет
+        runDiceAnimation(d1, d2, myId);
+    }
 };
-
-function runDiceAnimation(d1, d2, rollerId) {
-    const overlay = document.getElementById('dice-overlay');
-    const cube1 = document.getElementById('dice1');
-    const cube2 = document.getElementById('dice2');
-
-    overlay.style.display = 'flex';
-    cube1.classList.add('cube-rolling');
-    cube2.classList.add('cube-rolling');
-
-    setTimeout(() => {
-        cube1.classList.remove('cube-rolling');
-        cube2.classList.remove('cube-rolling');
-        applyFinalRotation(cube1, d1);
-        applyFinalRotation(cube2, d2);
-    }, 600);
-
-    setTimeout(async () => {
-        overlay.style.display = 'none';
-        cube1.style.transform = '';
-        cube2.style.transform = '';
-
-        // Только тот, кто инициировал бросок/переброс, обновляет базу в конце
-        if (myId === rollerId) {
-            const roomRef = ref(db, `rooms/${currentRoom}`);
-            const canFit = canFitAnywhere(d1, d2);
-            
-            // Важно: myEnergy здесь уже обновится через refreshUI, 
-            // так как spentEnergy мы записали в базу ДО начала анимации.
-            
-            if (!canFit) {
-                // Если места нет и это режим энергии
-                if (currentMode === 'energy' && myEnergy >= 2) {
-                    showToast("Мест нет! Используй энергию.");
-                    // Ставим pendingDice, чтобы кнопка переброса стала активной снова
-                    await update(roomRef, { 
-                        pendingDice: { w: d1, h: d2, player: myRole }, 
-                        activeRoll: null 
-                    });
-                } else {
-                    // Если классика или нет энергии на новый переброс — ГЕЙМ ОВЕР
-                    await update(roomRef, { 
-                        gameState: "finished", 
-                        activeRoll: null,
-                        pendingDice: null // Убираем фигуру, если проиграли
-                    });
-                }
-            } else {
-                // Место есть — просто фиксируем результат броска
-                await update(roomRef, { 
-                    pendingDice: { w: d1, h: d2, player: myRole }, 
-                    activeRoll: null 
-                });
-            }
-        }
-    }, 1800);
-}
 
 // Функция расчета финального поворота
 function applyFinalRotation(cube, value) {
-    // Базовые повороты для каждой грани
     const rotations = {
-        1: { x: 0,   y: 0 },
-        2: { x: -90, y: 0 },
-        3: { x: 0,   y: -90 },
-        4: { x: 0,   y: 90 },
-        5: { x: 90,  y: 0 },
-        6: { x: 180, y: 0 }
+        1: { x: 0,   y: 0,   z: 0 },
+        2: { x: -90, y: 0,   z: 0 },
+        3: { x: 0,   y: -90, z: 0 },
+        4: { x: 0,   y: 90,  z: 0 },
+        5: { x: 90,  y: 0,   z: 0 },
+        6: { x: 180, y: 0,   z: 180 } 
     };
 
     const target = rotations[value];
     
-    // Добавляем 3-4 полных оборота (1080-1440 градусов), 
-    // чтобы кубик "докручивался" до цели реалистично
+    // Добавляем обороты для реалистичности
     const extraX = 1080; 
     const extraY = 1080;
 
-    cube.style.transform = `rotateX(${target.x + extraX}deg) rotateY(${target.y + extraY}deg)`;
+    // Добавляем rotateZ в строку трансформации
+    cube.style.transform = `rotateX(${target.x + extraX}deg) rotateY(${target.y + extraY}deg) rotateZ(${target.z}deg)`;
 }
 
 window.confirmMove = async () => {
@@ -489,11 +772,12 @@ window.confirmMove = async () => {
     if (!canPlace(x, y, currentDice.w, currentDice.h, myRole)) return showToast("Тут нельзя!");
     targetingMode = false;
     const areaNow = lastData.totalArea ? (lastData.totalArea[myRole] || 0) : 0;
-    const updates = {
+    await syncGameState({
         [`figures/fig_${Date.now()}`]: { x, y, width: currentDice.w, height: currentDice.h, color: myRole },
-        turn: myRole === 'red' ? 'blue' : 'red', pendingDice: null, [`totalArea/${myRole}`]: areaNow + (currentDice.w * currentDice.h)
-    };
-    await update(ref(db, `rooms/${currentRoom}`), updates);
+        turn: myRole === 'red' ? 'blue' : 'red',
+        pendingDice: null,
+        [`totalArea/${myRole}`]: areaNow + (currentDice.w * currentDice.h)
+    });
     activeRectElement.remove(); activeRectElement = null; confirmBtn.style.display = 'none';
 };
 
@@ -519,26 +803,28 @@ window.useAbility = async (type) => {
         const d1 = Math.floor(Math.random() * 6) + 1;
         const d2 = Math.floor(Math.random() * 6) + 1;
         
-        // Очищаем старое превью локально
+        // 1. Мгновенно убираем старую фигуру из превью (локально)
         if(activeRectElement) { activeRectElement.remove(); activeRectElement = null; }
         document.getElementById('preview-zone').innerHTML = '';
         confirmBtn.style.display = 'none';
 
         const newSpent = spent + 2;
 
-        // Запускаем анимацию для всех через activeRoll
-        // и ОБЯЗАТЕЛЬНО зануляем pendingDice, чтобы старая фигура исчезла у обоих
-        await update(roomRef, { 
+        // 2. Запускаем бросок через activeRoll для синхронизации анимации
+        // Важно: обнуляем pendingDice, чтобы старая фигура исчезла у всех игроков
+        const updates = { 
             [`spentEnergy/${myRole}`]: newSpent, 
-            activeRoll: {
-                w: d1,
-                h: d2,
-                rollerId: myId,
-                timestamp: Date.now()
-            },
+            activeRoll: { w: d1, h: d2, rollerId: myId, timestamp: Date.now() },
             pendingDice: null, 
             lastDice: `${d1}x${d2}`
-        });
+        };
+
+        await syncGameState(updates);
+
+        // 3. Если мы в офлайне, запускаем анимацию вручную (в онлайне сработает слушатель базы)
+        if (currentPlayMode !== 'online') {
+            runDiceAnimation(d1, d2, myId);
+        }
 
         showToast("Переброс...");
     } else if (type === 'destroy' && myEnergy >= 4) {
@@ -547,17 +833,40 @@ window.useAbility = async (type) => {
         refreshUI();
         // Больше здесь ничего не нужно. Проверка будет в executeDestroy.
     } else if (type === 'max' && myEnergy >= 6) {
-        const res = await showModal("Архитектор", "Создайте фигуру (1-6):", [{text:"Создать", value:"create", class:"btn-main"}, {text:"Отмена", value:null, class:"btn-sub"}], true);
-        if (!res) return;
-        const {w, h} = res;
-        if (w<1 || w>6 || h<1 || h>6) return showToast("Размер 1-6!");
-        if (!canFitAnywhere(w, h)) return showModal("Места нет", `Фигура ${w}x${h} не влезет!`, [{text:"Ок", class:"btn-main"}]);
+        const res = await showModal("Архитектор", "Создайте фигуру (1-6):", [
+            {text:"Создать", value:"create", class:"btn-main"}, 
+            {text:"Отмена", value:null, class:"btn-sub"}
+        ], true);
         
-        if(activeRectElement) { activeRectElement.remove(); activeRectElement = null; }
-        document.getElementById('preview-zone').innerHTML = '';
+        if (!res) return;
 
-        currentDice = {w, h};
-        await update(roomRef, { [`spentEnergy/${myRole}`]: spent + 6, pendingDice: {w, h, player: myRole}, lastDice: `${w}x${h}` });
+        // Принудительно переводим в числа, чтобы избежать ошибок
+        const w = parseInt(res.w);
+        const h = parseInt(res.h);
+
+        if (isNaN(w) || isNaN(h) || w < 1 || w > 6 || h < 1 || h > 6) {
+            return showToast("Размер должен быть от 1 до 6!");
+        }
+
+        if (!canFitAnywhere(w, h)) {
+            return showModal("Места нет", `Фигура ${w}x${h} не влезет!`, [{text:"Ок", class:"btn-main"}]);
+        }
+        
+        // Очищаем старое превью перед созданием новой фигуры
+        if(activeRectElement) { 
+            activeRectElement.remove(); 
+            activeRectElement = null; 
+        }
+        document.getElementById('preview-zone').innerHTML = '';
+        confirmBtn.style.display = 'none';
+
+        // ИСПОЛЬЗУЕМ syncGameState вместо update
+        await syncGameState({ 
+            [`spentEnergy/${myRole}`]: spent + 6, 
+            pendingDice: { w: w, h: h, player: myRole }, 
+            lastDice: `${w}x${h}` 
+        });
+
         showToast("Фигура создана!");
     }
 };
@@ -568,9 +877,10 @@ async function executeDestroy(id) {
     const newSpent = spent + 4;
     
     // 1. Сначала удаляем фигуру и тратим энергию
-    await remove(ref(db, `rooms/${currentRoom}/figures/${id}`));
-    await update(ref(db, `rooms/${currentRoom}/spentEnergy`), { [myRole]: newSpent });
-    
+    await syncGameState({
+    [`figures/${id}`]: null, // Передача null в syncGameState теперь удаляет поле
+    [`spentEnergy/${myRole}`]: newSpent
+    });
     showToast("Сжёг!");
 
     // 2. Ждем микро-паузу, чтобы локальная сетка occupiedGrid успела обновиться из refreshUI
@@ -630,37 +940,61 @@ window.handleManualReset = async () => {
 
 async function handleManualResetAction(type) {
     if (!type) return;
-    if (type === "clear") {
-        await update(ref(db, `rooms/${currentRoom}`), { figures: null, gameState: 'playing', turn: 'red', pendingDice: null, totalArea: {red:0, blue:0}, spentEnergy: {red:0, blue:0} });
-        location.reload();
-    } else if (type === "config") {
-        // Убрали players: null, чтобы второй игрок не вылетал из базы
-        await update(ref(db, `rooms/${currentRoom}`), { 
-            figures: null, 
-            gameState: 'playing', 
-            turn: 'red', 
-            pendingDice: null, 
-            totalArea: {red:0, blue:0}, 
-            spentEnergy: {red:0, blue:0} 
-        });
+
+    // Объект сброса данных (общий для всех режимов)
+    const resetUpdates = { 
+        figures: null, 
+        gameState: 'playing', 
+        turn: 'red', 
+        pendingDice: null, 
+        totalArea: {red:0, blue:0}, 
+        spentEnergy: {red:0, blue:0},
+        lastDice: '?'
+    };
+
+    if (type === "config") {
+        // Здесь оставляем reload, так как нам НУЖНО вернуться в настройки
+        if (currentPlayMode === 'online') {
+            localStorage.setItem('cellsGame_playMode', 'online');
+            localStorage.setItem('cellsGame_room', currentRoom);
+            await update(ref(db, `rooms/${currentRoom}`), resetUpdates);
+        } else {
+            localData = null;
+        }
         localStorage.setItem('cellsGame_configMode', 'true');
         location.reload();
-    } else if (type === "exit") {
-        const roomRef = ref(db, `rooms/${currentRoom}`);
-        const snap = await get(roomRef);
-        
-        if (snap.exists()) {
-            let players = snap.val().players || {};
-            // Удаляем только себя из списка игроков
-            if (players.red === myId) delete players.red;
-            if (players.blue === myId) delete players.blue;
+    } 
+    else if (type === "clear") {
+        // ИСПРАВЛЕНИЕ: Очищаем карту без перезагрузки страницы
+        if (currentPlayMode === 'online') {
+            await update(ref(db, `rooms/${currentRoom}`), resetUpdates);
+        } else {
+            // В офлайне просто прогоняем сброс через нашу систему синхронизации
+            await syncGameState(resetUpdates);
+        }
 
-            // Если в комнате больше никого нет — удаляем комнату
-            if (Object.keys(players).length === 0) {
-                await remove(roomRef);
-            } else {
-                // Если кто-то остался — просто обновляем список игроков в базе
-                await set(ref(db, `rooms/${currentRoom}/players`), players);
+        // Сбрасываем локальные флаги, чтобы интерфейс ожил
+        gameEndedAlertShown = false; // Позволяет снова показать окно финиша в конце новой игры
+        if (activeRectElement) {
+            activeRectElement.remove();
+            activeRectElement = null;
+        }
+        document.getElementById('preview-zone').innerHTML = '';
+        confirmBtn.style.display = 'none';
+        
+        showToast("Карта очищена!");
+        // location.reload(); <-- УДАЛЕНО, чтобы остаться в игре
+    } 
+    else if (type === "exit") {
+        if (currentPlayMode === 'online') {
+            const roomRef = ref(db, `rooms/${currentRoom}`);
+            const snap = await get(roomRef);
+            if (snap.exists()) {
+                let players = snap.val().players || {};
+                if (players.red === myId) delete players.red;
+                if (players.blue === myId) delete players.blue;
+                if (Object.keys(players).length === 0) await remove(roomRef);
+                else await set(ref(db, `rooms/${currentRoom}/players`), players);
             }
         }
         localStorage.clear(); 
@@ -685,20 +1019,37 @@ function canFitAnywhere(w, h) {
 
 function canPlace(x, y, w, h, role) {
     if (x < 0 || y < 0 || x + w > 20 || y + h > 20) return false;
-    let ts = false, tc = false;
+    let touchesWall = false;
+    let touchesContact = false;
+
     for (let i = y; i < y + h; i++) {
         for (let j = x; j < x + w; j++) {
+            // Если клетка уже занята или это пустота (void) на карте
             if (occupiedGrid[i][j] || mapMask[i][j] === 0) return false;
+
             if (currentMode === 'connected') {
-                if (role === 'red' && j === 0) ts = true;
-                if (role === 'blue' && j + w === 20) ts = true;
-                [[i-1,j],[i+1,j],[i,j-1],[i,j+1]].forEach(([ny,nx]) => {
-                    if (ny>=0 && ny<20 && nx>=0 && nx<20 && occupiedGrid[ny][nx]===role) tc = true;
-                });
+                // Красные должны коснуться левой стены (x=0)
+                if (role === 'red' && j === 0) touchesWall = true;
+                // Синие должны коснуться правой стены (x=19)
+                if (role === 'blue' && j === 19) touchesWall = true;
+
+                // Проверка касания своих фигур (соседние клетки)
+                const neighbors = [[i-1, j], [i+1, j], [i, j-1], [i, j+1]];
+                for (let [ny, nx] of neighbors) {
+                    if (ny >= 0 && ny < 20 && nx >= 0 && nx < 20) {
+                        if (occupiedGrid[ny][nx] === role) touchesContact = true;
+                    }
+                }
             }
         }
     }
-    return currentMode === 'connected' ? (ts || tc) : true;
+
+    // В обычном режиме (classic/energy) возвращаем true, если клетки свободны.
+    // В режиме связности — только если коснулись стены или своей фигуры.
+    if (currentMode === 'connected') {
+        return touchesWall || touchesContact;
+    }
+    return true;
 }
 
 window.showRules = () => {
@@ -744,6 +1095,7 @@ function initGlobalRoomList() {
             item.className = 'room-item';
             item.onclick = () => {
                 roomInput.value = roomName;
+                currentRoom = roomName;
                 joinRoom(null, false);
             };
 
@@ -770,6 +1122,93 @@ function initGlobalRoomList() {
 
 // Вызываем функцию
 initGlobalRoomList();
+
+// Проверка: влезает ли фигура (аналог canFitAnywhere, но для бота)
+function canFitAnywhereBot(w, h, color) {
+    for (let y = 0; y <= 20 - h; y++) {
+        for (let x = 0; x <= 20 - w; x++) {
+            if (canPlace(x, y, w, h, color)) return true;
+        }
+    }
+    for (let y = 0; y <= 20 - w; y++) {
+        for (let x = 0; x <= 20 - h; x++) {
+            if (canPlace(x, y, h, w, color)) return true;
+        }
+    }
+    return false;
+}
+
+// Находит первую попавшуюся свободную позицию
+function findFirstFit(w, h, color) {
+    for (let y = 0; y <= 20 - h; y++) {
+        for (let x = 0; x <= 20 - w; x++) {
+            if (canPlace(x, y, w, h, color)) return {x, y, w, h};
+        }
+    }
+    for (let y = 0; y <= 20 - w; y++) {
+        for (let x = 0; x <= 20 - h; x++) {
+            if (canPlace(x, y, h, w, color)) return {x, y, w: h, h: w};
+        }
+    }
+    return null;
+}
+
+// Логика Архитектора для бота: ищет место под максимально возможный квадрат
+function findBestArchitectSize(color) {
+    const sizes = [6, 5, 4, 3];
+    let best = null;
+    let maxScore = -1;
+
+    for (let s of sizes) {
+        for (let y = 0; y <= 20 - s; y++) {
+            for (let x = 0; x <= 20 - s; x++) {
+                if (canPlace(x, y, s, s, color)) {
+                    let score = evaluateMove(x, y, s, s, color);
+                    if (score > maxScore) {
+                        maxScore = score;
+                        best = {x, y, w: s, h: s};
+                    }
+                }
+            }
+        }
+    }
+    return best;
+}
+
+function evaluateMove(x, y, w, h, color) {
+    let score = 0;
+
+    // 1. Приоритет углам (очень выгодно)
+    if ((x === 0 || x + w === 20) && (y === 0 || y + h === 20)) score += 50;
+
+    // 2. Приоритет краям
+    if (x === 0 || x + w === 20 || y === 0 || y + h === 20) score += 20;
+
+    // 3. Компактность: проверяем соседей. 
+    // Чем больше своих фигур или стен рядом, тем лучше (меньше дырок)
+    for (let i = y; i < y + h; i++) {
+        for (let j = x; j < x + w; j++) {
+            const neighbors = [[i-1, j], [i+1, j], [i, j-1], [i, j+1]];
+            for (let [ny, nx] of neighbors) {
+                if (ny < 0 || ny >= 20 || nx < 0 || nx >= 20) {
+                    score += 2; // Касание края
+                } else if (occupiedGrid[ny][nx] === color) {
+                    score += 5; // Касание своей фигуры
+                } else if (occupiedGrid[ny][nx] && occupiedGrid[ny][nx] !== color) {
+                    score += 8; // Блокировка противника (прижимаемся к нему)
+                }
+            }
+        }
+    }
+
+    // 4. В режиме связности (connected) поощряем продвижение к центру от своей стены
+    if (currentMode === 'connected') {
+        if (color === 'blue') score += (19 - x); // Синим выгодно идти влево
+        else score += x; // Красным выгодно идти вправо
+    }
+
+    return score;
+}
 
 // Добавим обновление списка при вводе текста в инпут (чтобы сортировка работала на лету)
 roomInput.oninput = () => initGlobalRoomList();

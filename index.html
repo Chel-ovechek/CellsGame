@@ -34,9 +34,17 @@
     <!-- ЛОББИ -->
     <div id="lobby-screen">
         <div class="lobby-card">
-            <h2 class="lobby-title">CellsGame Online</h2>
-            
-            <div id="lobby-main-step">
+            <!-- ШАГ 0: ВЫБОР ТИПА ИГРЫ -->
+            <div id="lobby-type-step">
+                <h2 class="lobby-title">CellsGame Online</h2>
+                <div class="lobby-actions" style="flex-direction: column;">
+                    <button onclick="selectPlayMode('online')" class="btn-primary">🌐 Игра по сети</button>
+                    <button onclick="selectPlayMode('local')" class="btn-success">📱 На одном устройстве</button>
+                    <button onclick="selectPlayMode('cpu')" class="btn-red">🤖 Против компьютера</button>
+                </div>
+                <div id="offline-room-list-placeholder"></div> <!-- Для списка комнат, если нужно -->
+            </div>
+            <div id="lobby-main-step" style="display: none;">
                 <input type="text" id="room-input" placeholder="Название комнаты..." autocomplete="off">
                 <div class="lobby-actions">
                     <button id="btn-create-room" class="btn-primary">Создать</button>
@@ -48,6 +56,7 @@
                         <!-- Сюда будут падать комнаты -->
                     </div>
                 </div>
+                <button onclick="localStorage.clear(); location.reload();" class="btn-back">Назад</button>
             </div>
 
             <div id="creator-settings" style="display: none;" class="fade-in">
@@ -76,9 +85,10 @@
                     <div class="setup-buttons-row">
                         <button id="pick-red" class="btn-red">КРАСНЫЙ</button>
                         <button id="pick-blue" class="btn-blue">СИНИЙ</button>
+                        <button id="btn-start-local" class="btn-success" style="display: none;">НАЧАТЬ ИГРУ</button>
                     </div>
                 </div>
-                <button onclick="localStorage.clear(); location.reload();" class="btn-back">← Сменить комнату</button>
+                <button onclick="localStorage.clear(); location.reload();" class="btn-back">Назад</button>
             </div>
         </div>
     </div>
