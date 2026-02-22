@@ -480,6 +480,8 @@ function startGame() {
     lobbyScreen.style.display = 'none';
     gameInterface.style.display = 'flex';
     
+    playerCount = 0;
+
     if (currentPlayMode === 'online') {
         document.getElementById('display-room-name').innerText = currentRoom;
         initRoomListener();
@@ -597,10 +599,37 @@ function runDiceAnimation(d1, d2, rollerId) {
 
 function refreshUI() {
     const data = lastData;
-    const pCount = data && data.players ? Object.keys(data.players).length : 0;
-    if (pCount > playerCount && pCount === 2) showToast("Второй игрок зашел!");
+    if (!data) return;
+
+    const occupancyEl = document.getElementById('room-occupancy');
+    
+    // 1. Считаем игроков
+    const players = data.players || {};
+    const pCount = Object.keys(players).length;
+
+    // 2. Логика уведомлений и счетчика (только для ОНЛАЙН)
+    if (currentPlayMode === 'online') {
+        if (occupancyEl) {
+            occupancyEl.style.display = 'inline';
+            occupancyEl.innerText = `👥 ${pCount}/2`;
+        }
+
+        // Если кто-то зашел (стало 2, а было меньше)
+        if (pCount === 2 && playerCount < 2) {
+            showToast("Второй игрок вошел!");
+        }
+        // Если кто-то вышел (стало меньше 2, а было 2)
+        if (pCount < 2 && playerCount === 2) {
+            showToast("Противник покинул комнату");
+        }
+    } else {
+        if (occupancyEl) occupancyEl.style.display = 'none';
+    }
+
+    // ВАЖНО: Обновляем старое значение playerCount ТОЛЬКО ЗДЕСЬ
     playerCount = pCount;
 
+    // 3. Общая логика игры (счет, ходы и т.д.)
     currentTurn = data.turn || 'red';
     currentGameState = data.gameState || 'playing';
     currentMapType = data.mapType || 'square';
@@ -632,22 +661,17 @@ function refreshUI() {
     const cs = gridElement.clientWidth / 20;
     let rScore = 0, bScore = 0;
 
-    // Сначала найдем ID самой последней поставленной фигуры
+    // Последняя фигура
     let latestId = null;
     let maxTime = 0;
     for (let id in figures) {
         const timestamp = parseInt(id.split('_')[1]);
-        if (timestamp > maxTime) {
-            maxTime = timestamp;
-            latestId = id;
-        }
+        if (timestamp > maxTime) { maxTime = timestamp; latestId = id; }
     }
 
     for (let id in figures) {
         const f = figures[id];
         const rect = document.createElement('div');
-        
-        // Добавляем класс last-move, если это последняя фигура
         const isLast = (id === latestId);
         rect.className = 'rectangle fixed' + 
                         (targetingMode && f.color !== myRole ? ' targetable' : '') +
@@ -658,17 +682,9 @@ function refreshUI() {
         rect.style.left = f.x * cs + 'px';
         rect.style.top = f.y * cs + 'px';
         rect.style.backgroundColor = f.color === 'red' ? '#e84393' : '#0984e3';
-        
         if(targetingMode && f.color !== myRole) rect.onclick = () => executeDestroy(id);
-        
         gridElement.appendChild(rect);
-        
-        // Заполнение сетки для логики
-        for (let i = f.y; i < f.y + f.height; i++) {
-            for (let j = f.x; j < f.x + f.width; j++) {
-                occupiedGrid[i][j] = f.color;
-            }
-        }
+        for (let i = f.y; i < f.y + f.height; i++) for (let j = f.x; j < f.x + f.width; j++) occupiedGrid[i][j] = f.color;
         f.color === 'red' ? rScore += f.width * f.height : bScore += f.width * f.height;
     }
 
@@ -677,6 +693,7 @@ function refreshUI() {
     turnDisplay.innerText = `Ход: ${currentTurn === 'red' ? 'КРАСНЫХ' : 'СИНИХ'}`;
     turnDisplay.style.backgroundColor = currentTurn === 'red' ? 'var(--red)' : 'var(--blue)';
 
+    // Энергия
     if (currentMode === 'energy') {
         document.getElementById('ability-bar').style.display = 'flex';
         document.getElementById('red-energy').style.display = 'inline';
@@ -694,27 +711,26 @@ function refreshUI() {
         document.getElementById('blue-energy').style.display = 'none';
     }
 
-    // Проверка кубиков: создаем, обновляем или УДАЛЯЕМ фигуру
+    // Превью
     if (data.pendingDice && data.pendingDice.player === myRole) {
         if (!activeRectElement || currentDice.w !== data.pendingDice.w || currentDice.h !== data.pendingDice.h) {
             currentDice = { w: data.pendingDice.w, h: data.pendingDice.h };
             createDraggable(currentDice.w, currentDice.h);
         }
     } else {
-        // Если в базе нет брошенных кубиков для нас, а на экране (или в превью) что-то висит — удаляем
         if (activeRectElement) {
-            activeRectElement.remove();
-            activeRectElement = null;
+            activeRectElement.remove(); activeRectElement = null;
             confirmBtn.style.display = 'none';
             document.getElementById('preview-zone').innerHTML = '';
         }
     }
 
+    // Финиш
     if (currentGameState === 'finished' && !gameEndedAlertShown) {
-        if(activeRectElement) { activeRectElement.remove(); activeRectElement = null; } // Убираем фигуру с экрана
+        if(activeRectElement) { activeRectElement.remove(); activeRectElement = null; }
         gameEndedAlertShown = true;
-        const winner = rScore > bScore ? 'КРАСНЫЕ' : 'СИНИЕ';
-        showModal("ИГРА ОКОНЧЕНА", `Выпало: ${data.lastDice}.\nМест нет!\nПобедили ${winner}\nСчет ${rScore}:${bScore}`, [
+        const winner = rScore > bScore ? 'КРАСНЫЕ' : (rScore === bScore ? 'НИЧЬЯ' : 'СИНИЕ');
+        showModal("ИГРА ОКОНЧЕНА", `Победили ${winner}\nСчет ${rScore}:${bScore}`, [
             { text: "Сыграть снова", value: "clear", class: "btn-main" },
             { text: "Выйти в лобби", value: "exit", class: "btn-sub" }
         ]).then(res => handleManualResetAction(res));

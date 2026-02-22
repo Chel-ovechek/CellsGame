@@ -36,7 +36,7 @@
         <div class="lobby-card">
             <!-- ШАГ 0: ВЫБОР ТИПА ИГРЫ -->
             <div id="lobby-type-step">
-                <h2 class="lobby-title">CellsGame Online</h2>
+                <h2 class="lobby-title">CellsGame</h2>
                 <div class="lobby-actions" style="flex-direction: column;">
                     <button onclick="selectPlayMode('online')" class="btn-primary">🌐 Игра по сети</button>
                     <button onclick="selectPlayMode('local')" class="btn-success">📱 На одном устройстве</button>
@@ -97,6 +97,7 @@
     <div id="game-interface" style="display: none;">
         <div id="player-info-bar">
             <span>Комната: <b id="display-room-name">...</b></span>
+            <span id="room-occupancy" style="display:none; font-weight: bold; color: var(--primary);">👥 1/2</span>
             <span id="turn-display">Ход: ...</span>
             <span id="my-role-display">Вы: ...</span>
         </div>
